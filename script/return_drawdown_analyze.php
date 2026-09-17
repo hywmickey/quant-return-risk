@@ -199,20 +199,22 @@ function load_index_data(string $path): array
 
 // ------ 主逻辑 ------
 
+require_once __DIR__ . '/config_loader.php';
+
 $opts = getopt('', ['in::', 'out::', 'top-out::', 'html-out::', 'top::', 'min::', 'title::', 'help']);
 
 if (isset($opts['help'])) {
     echo "用法：php return_drawdown_analyze.php [--in=us30_daily.csv] [--out=xxx.csv] [--top-out=yyy.csv] [--html-out=yyy.html] [--top=0.1] [--min=0.01] [--title=指数名]\n";
-    echo "默认输入读 data/daily/{in}.csv，输出落 data/drawdown/{in}_drawdown[_top].csv 与 html/{in}_drawdown_top.html，通常只需传 --in（和 --title）。\n";
+    echo "默认输入读 config.php 中 daily 目录下的 {in}.csv，回撤 CSV 落 drawdown 目录、HTML 落 html 目录，通常只需传 --in（和 --title）。\n";
     exit(0);
 }
 
-// 项目根目录与标准输出目录：默认把回撤 CSV 写到 data/drawdown/、HTML 写到 html/，
-// 输入文件未带路径时按 data/daily/ 查找，省去每次手写 --out / --top-out / --html-out
-$project_root = dirname(__DIR__);
-$daily_dir    = $project_root . '/data/daily';
-$drawdown_dir = $project_root . '/data/drawdown';
-$html_dir     = $project_root . '/html';
+// 标准目录统一来自项目根目录 config.php（经 config_loader.php 解析）：
+// 输入文件未带路径时按 daily 目录查找，回撤 CSV 写 drawdown 目录，HTML 写 html 目录
+$config       = quant_config();
+$daily_dir    = $config['daily_dir'];
+$drawdown_dir = $config['drawdown_dir'];
+$html_dir     = $config['html_dir'];
 
 $in_file = (string) ($opts['in'] ?? '');
 if ($in_file === '') {

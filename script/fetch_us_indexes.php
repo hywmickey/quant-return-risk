@@ -258,7 +258,7 @@ if (PHP_SAPI === 'cli') {
 
     if (isset($opts['help'])) {
         echo "用法：php fetch_us_indexes.php [--series=DJIA,SP500,NASDAQ100,NASDAQNDXTMC,NASDAQNDXTMCTR] [--start=2026-01-01] [--end=2026-09-09] [--overlap=5] [--api-key=xxx]\n";
-        echo "默认增量更新 data/daily/ 下全部指数文件。\n";
+        echo "默认增量更新 config.php 的 daily 目录下全部指数文件。\n";
         exit(0);
     }
 
@@ -271,7 +271,9 @@ if (PHP_SAPI === 'cli') {
 
     $end     = $opts['end']     ?? date('Y-m-d');
     $overlap = max(0, (int) ($opts['overlap'] ?? 5));
-    $dataDir = __DIR__ . '/../data/daily';
+    // 日线 CSV 输出目录统一来自项目根目录 config.php 的 daily 配置
+    require_once __DIR__ . '/config_loader.php';
+    $dataDir = quant_config()['daily_dir'];
 
     // 本次要更新的序列：--series 指定，默认全部
     $seriesIds = array_keys(FredIndexFetcher::SERIES_FILES);

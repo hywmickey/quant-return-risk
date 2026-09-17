@@ -33,7 +33,7 @@
  *   --variant   STRD | NETR | GRTR，默认 GRTR
  *   --currency  货币，如 USD / EUR / LOCAL，默认 USD
  *   --freq      DAILY | END_OF_MONTH | ANNUAL，默认 DAILY（接口仅认这三个值）
- *   --out       输出文件路径，默认 msci_usa_50_{variant}_{freq}.csv
+ *   --out       输出文件路径，默认 config.php 的 daily 目录下 msci_usa_50_{variant}_{freq}.csv
  *   --format    csv | json，默认 csv
  *   --full      强制全量重抓，覆盖已有文件
  *   --overlap   增量时向前回溯的天数，默认 5
@@ -281,12 +281,15 @@ if (PHP_SAPI === 'cli') {
     $currency = strtoupper($opts['currency'] ?? 'USD');
     $freq     = strtoupper($opts['freq']     ?? 'DAILY');
     $format   = strtolower($opts['format']   ?? 'csv');
-    // 默认输出到 data/daily/msci_usa_50_{variant}_{freq}.{format}，省去每次手写 --out
+    // 默认输出到 config.php 的 daily 目录：msci_usa_50_{variant}_{freq}.{format}，省去每次手写 --out
+    require_once __DIR__ . '/config_loader.php';
+    $daily_dir = quant_config()['daily_dir'];
+
     $out = (string) ($opts['out'] ?? '');
     if ($out === '') {
-        $out = dirname(__DIR__) . "/data/daily/msci_usa_50_{$variant}_{$freq}." . $format;
+        $out = $daily_dir . "/msci_usa_50_{$variant}_{$freq}." . $format;
     } elseif (!str_contains($out, '/')) {
-        $out = dirname(__DIR__) . '/data/daily/' . $out;
+        $out = $daily_dir . '/' . $out;
     }
     $full     = isset($opts['full']);                        // 强制全量重抓
     $overlap  = max(0, (int) ($opts['overlap'] ?? 5));       // 增量时向前回溯的天数
