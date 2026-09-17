@@ -413,7 +413,7 @@ if (PHP_SAPI === 'cli' && isset($argv[0]) && realpath($argv[0]) === __FILE__) {
     if ($opts === false || isset($opts['help'])) {
         echo "用法：php get_fund_data.php --code=008114 [--out=file.csv] [--full]\n";
         echo "  --code  基金代码，6 位数字，必传\n";
-        echo "  --out   输出 CSV 路径，默认脚本同目录 fund_{code}_full_data.csv\n";
+        echo "  --out   输出 CSV 路径，默认 data/fund/fund_{code}_full_data.csv\n";
         echo "  --full  忽略已有文件，全量重抓覆盖\n";
         echo "默认增量：输出文件已存在时只抓比本地最新日期更新的记录。\n";
         exit($opts === false ? 1 : 0);
@@ -428,7 +428,13 @@ if (PHP_SAPI === 'cli' && isset($argv[0]) && realpath($argv[0]) === __FILE__) {
         exit(1);
     }
 
-    $outputFile = (string) ($opts['out'] ?? __DIR__ . "/fund_{$fundCode}_full_data.csv");
+    // 默认输出到 data/fund/fund_{code}_full_data.csv，省去每次手写 --out
+    $outputFile = (string) ($opts['out'] ?? '');
+    if ($outputFile === '') {
+        $outputFile = dirname(__DIR__) . "/data/fund/fund_{$fundCode}_full_data.csv";
+    } elseif (!str_contains($outputFile, '/')) {
+        $outputFile = dirname(__DIR__) . '/data/fund/' . $outputFile;
+    }
     $full       = isset($opts['full']);
 
     echo "基金 {$fundCode} " . getFundInfo($fundCode) . "\n";

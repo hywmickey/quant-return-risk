@@ -281,7 +281,13 @@ if (PHP_SAPI === 'cli') {
     $currency = strtoupper($opts['currency'] ?? 'USD');
     $freq     = strtoupper($opts['freq']     ?? 'DAILY');
     $format   = strtolower($opts['format']   ?? 'csv');
-    $out      = $opts['out'] ?? __DIR__ . "/msci_usa_50_{$variant}_{$freq}." . $format;
+    // 默认输出到 data/daily/msci_usa_50_{variant}_{freq}.{format}，省去每次手写 --out
+    $out = (string) ($opts['out'] ?? '');
+    if ($out === '') {
+        $out = dirname(__DIR__) . "/data/daily/msci_usa_50_{$variant}_{$freq}." . $format;
+    } elseif (!str_contains($out, '/')) {
+        $out = dirname(__DIR__) . '/data/daily/' . $out;
+    }
     $full     = isset($opts['full']);                        // 强制全量重抓
     $overlap  = max(0, (int) ($opts['overlap'] ?? 5));       // 增量时向前回溯的天数
 

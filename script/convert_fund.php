@@ -20,26 +20,29 @@
 $opts = getopt('', ['in:', 'out::', 'help']);
 
 if ($opts === false || isset($opts['help'])) {
-    echo "用法：php convert_fund.php --in=doc/fund_008114_full_data.csv [--out=fund_008114_daily.csv]\n";
-    echo "  --in   get_fund_data.php 产出的原始 CSV，必传\n";
-    echo "  --out  输出文件，默认按输入文件名推导为 fund_{code}_daily.csv\n";
+    echo "用法：php convert_fund.php --in=fund_008114_full_data.csv [--out=fund_008114_daily.csv]\n";
+    echo "  --in   get_fund_data.php 产出的原始 CSV，必传；未带路径时按 data/fund/ 查找\n";
+    echo "  --out  输出文件，默认按输入文件名推导为 data/daily/fund_{code}_daily.csv\n";
     exit($opts === false ? 1 : 0);
 }
 
 $in_file = (string) ($opts['in'] ?? '');
 if ($in_file === '') {
-    fwrite(STDERR, "缺少必传参数 --in，如 --in=doc/fund_008114_full_data.csv\n");
+    fwrite(STDERR, "缺少必传参数 --in，如 --in=fund_008114_full_data.csv\n");
     exit(1);
 }
+// 未带路径分隔符时按 data/fund/ 下查找，省去每次手写 data/fund/ 前缀
 if (!str_contains($in_file, '/')) {
-    $in_file = __DIR__ . '/' . $in_file;
+    $in_file = dirname(__DIR__) . '/data/fund/' . $in_file;
 }
 
-// 默认输出名：fund_008114_full_data.csv -> fund_008114_daily.csv
+// 默认输出到 data/daily/，文件名按输入推导：fund_008114_full_data.csv -> data/daily/fund_008114_daily.csv
 $default_out = preg_replace('/_full_data\.csv$/', '_daily.csv', basename($in_file));
-$out_file    = (string) ($opts['out'] ?? __DIR__ . '/' . $default_out);
-if (!str_contains($out_file, '/')) {
-    $out_file = __DIR__ . '/' . $out_file;
+$out_file    = (string) ($opts['out'] ?? '');
+if ($out_file === '') {
+    $out_file = dirname(__DIR__) . '/data/daily/' . $default_out;
+} elseif (!str_contains($out_file, '/')) {
+    $out_file = dirname(__DIR__) . '/data/daily/' . $out_file;
 }
 
 $fp = fopen($in_file, 'r');

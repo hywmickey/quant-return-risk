@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""用 yfinance 抓取美股指数历史收盘点位，输出 msci_drawdown_analyze.php 可直接读取的 CSV。
+"""用 yfinance 抓取美股指数历史收盘点位，输出 return_drawdown_analyze.php 可直接读取的 CSV。
 
 PHP 直连 Yahoo 会被 429 限流（匿名请求没有 cookie+crumb），yfinance 内部维护
 持久 cookie，所以这一步用 Python 完成，后续回撤分析仍然走 PHP 脚本。

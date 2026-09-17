@@ -1,6 +1,6 @@
 <?php
 /**
- * MSCI USA 50 Index 历史回撤计算
+ * 指数 / 基金的收益与历史回撤分析
  *
  * 回撤算法源自 doc/dropdown_analyze.php，只是把基金的「累计净值 lj_nav」
  * 换成指数的「收盘点位 level」：
@@ -16,10 +16,10 @@
  * 注意：与原脚本一样，数据末尾尚未走完（还没反弹）的那段回撤不会被结算输出。
  *
  * 用法：
- *   php msci_drawdown_analyze.php                                   # 读 msci_usa_50_GRTR_DAILY.csv
- *   php msci_drawdown_analyze.php --in=xxx.csv --out=yyy.csv        # 指定输入输出
- *   php msci_drawdown_analyze.php --min=5                           # 只保留回撤幅度 >= 5% 的记录
- *   php msci_drawdown_analyze.php --top=0.2 --top-out=zzz.csv       # 取幅度最大的前 20%
+ *   php return_drawdown_analyze.php                                   # 读 msci_usa_50_GRTR_DAILY.csv
+ *   php return_drawdown_analyze.php --in=xxx.csv --out=yyy.csv        # 指定输入输出
+ *   php return_drawdown_analyze.php --min=5                           # 只保留回撤幅度 >= 5% 的记录
+ *   php return_drawdown_analyze.php --top=0.2 --top-out=zzz.csv       # 取幅度最大的前 20%
  *
  * 输出 CSV 列：
  *   date_start    回撤起点日期（高点）
@@ -202,22 +202,46 @@ function load_index_data(string $path): array
 $opts = getopt('', ['in::', 'out::', 'top-out::', 'html-out::', 'top::', 'min::', 'title::', 'help']);
 
 if (isset($opts['help'])) {
-    echo "用法：php msci_drawdown_analyze.php [--in=msci_usa_50_GRTR_DAILY.csv] [--out=xxx.csv] [--top-out=yyy.csv] [--html-out=yyy.html] [--top=0.1] [--min=0.01] [--title=指数名]\n";
+    echo "用法：php return_drawdown_analyze.php [--in=us30_daily.csv] [--out=xxx.csv] [--top-out=yyy.csv] [--html-out=yyy.html] [--top=0.1] [--min=0.01] [--title=指数名]\n";
+    echo "默认输入读 data/daily/{in}.csv，输出落 data/drawdown/{in}_drawdown[_top].csv 与 html/{in}_drawdown_top.html，通常只需传 --in（和 --title）。\n";
     exit(0);
 }
 
-$in_file  = $opts['in']  ?? __DIR__ . '/msci_usa_50_GRTR_DAILY.csv';
-$out_file = $opts['out'] ?? preg_replace('/\.csv$/i', '', basename($in_file)) . '_drawdown.csv';
-if (!str_contains($out_file, '/')) {
-    $out_file = __DIR__ . '/' . $out_file;
+// 项目根目录与标准输出目录：默认把回撤 CSV 写到 data/drawdown/、HTML 写到 html/，
+// 输入文件未带路径时按 data/daily/ 查找，省去每次手写 --out / --top-out / --html-out
+$project_root = dirname(__DIR__);
+$daily_dir    = $project_root . '/data/daily';
+$drawdown_dir = $project_root . '/data/drawdown';
+$html_dir     = $project_root . '/html';
+
+$in_file = (string) ($opts['in'] ?? '');
+if ($in_file === '') {
+    $in_file = $daily_dir . '/msci_usa_50_GRTR_DAILY.csv';
+} elseif (!str_contains($in_file, '/')) {
+    $in_file = $daily_dir . '/' . $in_file;
 }
-$top_file = $opts['top-out'] ?? preg_replace('/\.csv$/i', '', $out_file) . '_top.csv';
-if (!str_contains($top_file, '/')) {
-    $top_file = __DIR__ . '/' . $top_file;
+
+$in_base = preg_replace('/\.csv$/i', '', basename($in_file));
+
+$out_file = (string) ($opts['out'] ?? '');
+if ($out_file === '') {
+    $out_file = $drawdown_dir . '/' . $in_base . '_drawdown.csv';
+} elseif (!str_contains($out_file, '/')) {
+    $out_file = $drawdown_dir . '/' . $out_file;
 }
-$html_file = $opts['html-out'] ?? preg_replace('/\.csv$/i', '', $top_file) . '.html';
-if (!str_contains($html_file, '/')) {
-    $html_file = __DIR__ . '/' . $html_file;
+
+$top_file = (string) ($opts['top-out'] ?? '');
+if ($top_file === '') {
+    $top_file = $drawdown_dir . '/' . $in_base . '_drawdown_top.csv';
+} elseif (!str_contains($top_file, '/')) {
+    $top_file = $drawdown_dir . '/' . $top_file;
+}
+
+$html_file = (string) ($opts['html-out'] ?? '');
+if ($html_file === '') {
+    $html_file = $html_dir . '/' . $in_base . '_drawdown_top.html';
+} elseif (!str_contains($html_file, '/')) {
+    $html_file = $html_dir . '/' . $html_file;
 }
 $min_ratio = (float) ($opts['min'] ?? 0.01);   // 太小的回撤忽略
 $top_ratio = (float) ($opts['top'] ?? 0.1);    // 取回撤幅度最大的前 10%

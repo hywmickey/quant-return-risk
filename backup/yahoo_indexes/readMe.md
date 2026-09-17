@@ -50,6 +50,6 @@ $ ~/.venvs/yf/bin/python fetch_yahoo_indexes.py us30
 # 生成 us30_yahoo.csv
 $ php convert_dja.php  # DJA + 补丁 -> us30_daily.csv
 # 生成分析报告
-$ php msci_drawdown_analyze.php --in=us30_daily.csv --title="道琼斯工业平均指数 (US30)"
+$ php return_drawdown_analyze.php --in=us30_daily.csv --title="道琼斯工业平均指数 (US30)"
 ```
 

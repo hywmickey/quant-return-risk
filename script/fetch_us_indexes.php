@@ -6,9 +6,11 @@
  *   https://api.stlouisfed.org/fred/series/observations
  *
  * series_id 与本地文件对应关系：
- *   DJIA      -> data/daily/us30_daily.csv      （道琼斯工业平均指数）
- *   SP500     -> data/daily/sp500_daily.csv     （标普 500 指数）
- *   NASDAQ100 -> data/daily/nasdaq100_daily.csv （纳斯达克 100 指数）
+ *   DJIA            -> data/daily/us30_daily.csv       （道琼斯工业平均指数）
+ *   SP500           -> data/daily/sp500_daily.csv      （标普 500 指数）
+ *   NASDAQ100       -> data/daily/nasdaq100_daily.csv  （纳斯达克 100 指数）
+ *   NASDAQNDXTMC    -> data/daily/ndxtmc_daily.csv     （纳斯达克 100 科技行业市值加权指数 NDXTMC，价格指数）
+ *   NASDAQNDXTMCTR  -> data/daily/ndxtmc_tr_daily.csv  （NDXTMC 总收益指数，分红再投资）
  *
  * 输出 CSV 与 convert_fund.php / fetch_msci_usa50.php 一致：UTF-8 BOM + date,level,change_pct
  *
@@ -18,14 +20,16 @@
  *   适合挂 crontab 每日跑一次。
  *
  * 用法：
- *   php fetch_us_indexes.php                                  # 增量更新全部三个指数
+ *   php fetch_us_indexes.php                                  # 增量更新全部指数
  *   php fetch_us_indexes.php --series=SP500                   # 只更新指定指数，逗号分隔可多个
+ *   php fetch_us_indexes.php --series=NASDAQNDXTMC            # 只更新 NDXTMC 价格指数
+ *   php fetch_us_indexes.php --series=NASDAQNDXTMCTR          # 只更新 NDXTMC 总收益指数
  *   php fetch_us_indexes.php --overlap=10                     # 增量时向前回溯 10 天
  *   php fetch_us_indexes.php --start=2026-01-01 --end=2026-09-09
  *   php fetch_us_indexes.php --api-key=xxx                    # 也可用环境变量 FRED_API_KEY
  *
  * 参数：
- *   --series    只更新指定 series_id（DJIA / SP500 / NASDAQ100），默认全部
+ *   --series    只更新指定 series_id（DJIA / SP500 / NASDAQ100 / NASDAQNDXTMC / NASDAQNDXTMCTR），默认全部
  *   --start     起始日期 YYYY-MM-DD，显式指定时不走增量推算
  *   --end       结束日期 YYYY-MM-DD，默认今天
  *   --overlap   增量时向前回溯的天数，默认 5
@@ -40,9 +44,20 @@ class FredIndexFetcher
 
     /** series_id => 本地 CSV 文件名（相对 data/daily 目录） */
     public const SERIES_FILES = [
-        'DJIA'      => 'us30_daily.csv',
-        'SP500'     => 'sp500_daily.csv',
-        'NASDAQ100' => 'nasdaq100_daily.csv',
+        'DJIA'           => 'us30_daily.csv',
+        'SP500'          => 'sp500_daily.csv',
+        'NASDAQ100'      => 'nasdaq100_daily.csv',
+        'NASDAQNDXTMC'   => 'ndxtmc_daily.csv',
+        'NASDAQNDXTMCTR' => 'ndxtmc_tr_daily.csv',
+    ];
+
+    /** series_id => 全量抓取的默认起始日期（各指数发布/有数据的最早日期） */
+    public const SERIES_STARTS = [
+        'DJIA'           => '2000-01-01',
+        'SP500'          => '2000-01-01',
+        'NASDAQ100'      => '2000-01-01',
+        'NASDAQNDXTMC'   => '2022-03-21',   // NDXTMC 指数发布日（base value 1000）
+        'NASDAQNDXTMCTR' => '2022-03-21',
     ];
 
     /** @var string FRED api_key */
@@ -242,8 +257,8 @@ if (PHP_SAPI === 'cli') {
     $opts = getopt('', ['series::', 'start::', 'end::', 'overlap::', 'api-key::', 'help']);
 
     if (isset($opts['help'])) {
-        echo "用法：php fetch_us_indexes.php [--series=DJIA,SP500,NASDAQ100] [--start=2026-01-01] [--end=2026-09-09] [--overlap=5] [--api-key=xxx]\n";
-        echo "默认增量更新 data/daily/ 下三个指数文件：us30 / sp500 / nasdaq100。\n";
+        echo "用法：php fetch_us_indexes.php [--series=DJIA,SP500,NASDAQ100,NASDAQNDXTMC,NASDAQNDXTMCTR] [--start=2026-01-01] [--end=2026-09-09] [--overlap=5] [--api-key=xxx]\n";
+        echo "默认增量更新 data/daily/ 下全部指数文件。\n";
         exit(0);
     }
 
@@ -285,8 +300,8 @@ if (PHP_SAPI === 'cli') {
                 $start    = date('Y-m-d', strtotime("{$lastDate} -{$overlap} day"));
                 echo "[{$seriesId}] 已有 " . count($existing) . " 条（截至 {$lastDate}），增量更新 ...\n";
             } else {
-                // 本地没有文件时从头抓（显式 --start 时按指定日期）
-                $start = $opts['start'] ?? '2000-01-01';
+                // 本地没有文件时从该指数的最早可用日期抓（显式 --start 时按指定日期）
+                $start = $opts['start'] ?? (FredIndexFetcher::SERIES_STARTS[$seriesId] ?? '2000-01-01');
                 echo "[{$seriesId}] 本地无数据或指定了 --start，全量抓取 {$start} 起 ...\n";
             }
 

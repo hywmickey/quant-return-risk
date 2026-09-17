@@ -25,13 +25,13 @@
 ```bash
 $ php script/fetch_us_indexes.php # 增量更新美股三大指数
 
-# 更新美股三大指数数据分析
+# 更新美股三大指数数据分析（--in 只写文件名即可，输出路径默认落到 data/drawdown/ 与 html/）
 
-$ php script/msci_drawdown_analyze.php --in=data/daily/us30_daily.csv --out=data/drawdown/us30_daily_drawdown.csv --top-out=data/drawdown/us30_daily_drawdown_top.csv --html-out=html/us30_daily_drawdown_top.html --title="道琼斯指数"
+$ php script/return_drawdown_analyze.php --in=us30_daily.csv --title="道琼斯指数"
 
-$ php script/msci_drawdown_analyze.php --in=data/daily/sp500_daily.csv --out=data/drawdown/sp500_daily_drawdown.csv --top-out=data/drawdown/sp500_daily_drawdown_top.csv --html-out=html/sp500_daily_drawdown_top.html --title="标准普尔500指数"
+$ php script/return_drawdown_analyze.php --in=sp500_daily.csv --title="标准普尔500指数"
 
-$ php script/msci_drawdown_analyze.php --in=data/daily/nasdaq100_daily.csv --out=data/drawdown/nasdaq100_daily_drawdown.csv --top-out=data/drawdown/nasdaq100_daily_drawdown_top.csv --html-out=html/nasdaq100_daily_drawdown_top.html --title="纳斯达克100指数"
+$ php script/return_drawdown_analyze.php --in=nasdaq100_daily.csv --title="纳斯达克100指数"
 ```
 
 
@@ -39,20 +39,20 @@ $ php script/msci_drawdown_analyze.php --in=data/daily/nasdaq100_daily.csv --out
 ### 国内基金数据更新
 
 ```bash
-# 更新数据抓取
-$ php script/get_fund_data.php --code=008114 --out=data/fund/fund_008114_full_data.csv
-# 更新每日收益变化数据
-$ php script/convert_fund.php --in=data/fund/fund_008114_full_data.csv --out=data/daily/fund_008114_daily.csv
+# 更新数据抓取（默认输出 data/fund/fund_{code}_full_data.csv）
+$ php script/get_fund_data.php --code=008114
+# 更新每日收益变化数据（--in 只写文件名即按 data/fund/ 查找，默认输出 data/daily/fund_{code}_daily.csv）
+$ php script/convert_fund.php --in=fund_008114_full_data.csv
 # 更新回撤报告
-$ php script/msci_drawdown_analyze.php --in=data/daily/fund_008114_daily.csv --out=data/drawdown/fund_008114_daily_drawdown.csv --top-out=data/drawdown/fund_008114_daily_drawdown_top.csv --html-out=html/fund_008114_daily_drawdown_top.html --title="天弘中证红利低波动100联接A(008114)"
+$ php script/return_drawdown_analyze.php --in=fund_008114_daily.csv --title="天弘中证红利低波动100联接A(008114)"
 ```
 
 #### MSCI US50 指数更新
 
 ```bash
-# 更新数据抓取
-$ php script/fetch_msci_usa50.php  --out=data/daily/msci_usa_50_GRTR_DAILY.csv
+# 更新数据抓取（默认输出 data/daily/msci_usa_50_GRTR_DAILY.csv）
+$ php script/fetch_msci_usa50.php
 # 更新回撤报告
-$ php script/msci_drawdown_analyze.php --in=data/daily/msci_usa_50_GRTR_DAILY.csv --out=data/drawdown/msci_usa_50_GRTR_DAILY_drawdown.csv --top-out=data/drawdown/msci_usa_50_GRTR_DAILY_drawdown_top.csv --html-out=html/msci_usa_50_GRTR_DAILY_drawdown_top.html --title="MSCI美国50指数"
+$ php script/return_drawdown_analyze.php --in=msci_usa_50_GRTR_DAILY.csv --title="MSCI美国50指数"
 ```
 
