@@ -45,6 +45,10 @@ $ php script/return_drawdown_analyze.php --in=us30_daily.csv --title="道琼斯�
 $ php script/return_drawdown_analyze.php --in=sp500_daily.csv --title="标准普尔500指数"
 
 $ php script/return_drawdown_analyze.php --in=nasdaq100_daily.csv --title="纳斯达克100指数"
+
+# NYSE FANG+ 指数（Yahoo 代码 ^NYFANG，2014-09-22 起有数据；需 pip install --user yfinance）
+$ php script/fetch_yahoo_index.php                              # 增量更新，默认输出 data/daily/nyfang_daily.csv
+$ php script/return_drawdown_analyze.php --in=nyfang_daily.csv --title="NYSE FANG+ 指数"
 ```
 
 
