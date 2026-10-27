@@ -8,7 +8,7 @@
 - 风险指标计算（波动率、夏普比率等）
 - 最大回撤及相关指标
 - 支持基金、股票、指数数据
-- 投资组合数据分析（规划中）
+- 投资组合回测（多基金组合、权重配置、多种再平衡策略）
 
 适用于量化研究者、投资者和开发者，帮助更清晰地评估金融产品的风险与收益表现。
 
@@ -24,6 +24,7 @@
 | `drawdown` | `data/drawdown` | 回撤分析 CSV 输出 |
 | `fund` | `data/fund` | 基金原始净值 CSV |
 | `html` | `html` | 回撤分析 HTML 报告输出 |
+| `portfolio` | `data/portfolio` | 投资组合回测净值 CSV 输出 |
 
 目录可写相对路径（相对项目根目录解析）或绝对路径；命令行显式传入的 `--in` / `--out` 等参数优先级高于该配置。
 
@@ -37,6 +38,10 @@
 | `[titles_indexes]` | `CSV 文件名 = 中文标题` | 文件名（含 `.csv` 后缀）需与 `data/daily/` 下的文件完全一致 |
 
 新增数据源时在对应 section 追加一行即可，无需改动任何脚本。
+
+### 投资组合定义（`portfolio_*`）
+
+`config.ini` 中每个以 `portfolio_` 开头的 section 即一个投资组合回测任务，包含 `name` / `funds` / `rebalance` 等键，详见下文[投资组合回测](#投资组合回测)。
 
 ## 数据分析
 
@@ -117,4 +122,67 @@ $ php script/fetch_msci_usa50.php
 # 更新回撤报告
 $ php script/return_drawdown_analyze.php --in=msci_usa_50_GRTR_DAILY.csv --title="MSCI美国50指数"
 ```
+
+### 投资组合回测
+
+`script/portfolio_nav.php` 把 `config.ini` 中定义的多个基金组合模拟成一条「虚拟基金」的日净值序列，格式与 `data/daily/fund_*.csv` 完全一致（`date,level,change_pct`），可直接交给 `return_drawdown_analyze.php` 生成与单只基金版式相同的收益与回撤 HTML 报告。
+
+#### 组合定义
+
+在 `config.ini` 中新增以 `portfolio_` 开头的 section（后缀即组合 key），无需改动任何脚本：
+
+```ini
+[portfolio_bond_nasdaq]
+name      = 债基+纳指组合（50/50 年度再平衡）
+funds     = 003376:50,160213:50
+rebalance = period
+period    = annual
+```
+
+| 配置键 | 说明 |
+|---|---|
+| `name` | 组合显示名，用作 HTML 页面标题 |
+| `funds` | `基金代码:权重`，逗号分隔；至少 2 只，权重之和须等于 100 |
+| `rebalance` | 再平衡触发方式，见下表；缺省 `none` |
+| `period` | 仅 `rebalance = period` 时生效 |
+| `threshold` | 仅 `rebalance = threshold` 时生效，单位百分点（如 `10` 表示 10%） |
+
+| `rebalance` | 触发时机 |
+|---|---|
+| `none` | 买入后持有，权重自然漂移，不再平衡 |
+| `period` | 每周期最后一个交易日（`period` = `monthly` / `quarterly` / `semiannual` / `annual`） |
+| `anniversary` | 基准日的每年周年，取周年日当天或之后首个交易日 |
+| `threshold` | 任一基金实际权重与目标权重相差达到 `threshold` 个百分点，每日收盘后检查 |
+
+#### 回测规则
+
+1. **基准日**：各基金首个数据日中最晚的一天（成立时间最晚的基金决定组合起点），各基金净值在基准日归一为 1
+2. **交易日历**：取各基金日期的并集；某基金当日缺数据时用前一交易日净值填充（QDII 与内地基金节假日不同步）
+3. **净值计算**：每日各腿市值按所属基金净值涨跌浮动，组合净值 = 各腿市值之和
+4. **再平衡**：触发时把各腿市值重置回「组合净值 × 目标权重」，只改变占比、不改变组合净值
+
+#### 运行
+
+```bash
+# 回测 config.ini 中定义的全部组合
+$ php script/portfolio_nav.php
+
+# 只回测指定组合（传 section 名的 portfolio_ 后缀）
+$ php script/portfolio_nav.php --portfolio=bond_nasdaq
+
+# 生成 HTML 报告：把上面输出的 CSV 直接作为 --in
+$ php script/return_drawdown_analyze.php \
+    --in=data/portfolio/portfolio_bond_nasdaq_daily.csv \
+    --title="债基+纳指组合（50/50 年度再平衡）"
+```
+
+产出文件：
+
+| 路径 | 内容 |
+|---|---|
+| `data/portfolio/portfolio_{key}_daily.csv` | 组合日净值序列 |
+| `data/drawdown/portfolio_{key}_daily_drawdown*.csv` | 回撤明细与前 10% 记录 |
+| `html/portfolio_{key}_daily_drawdown_top.html` | 整体收益、年度涨跌幅、回撤记录等完整报告 |
+
+注意：投资组合回测不在 `update_all.php` 的一键流程内（该流程的回撤分析只扫描 `data/daily/*_daily.csv`），需在基金数据更新完成后单独执行上述两条命令。
 
