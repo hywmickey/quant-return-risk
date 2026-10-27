@@ -10,7 +10,7 @@
  *   5. 对所有日线 CSV 生成回撤分析报告
  *
  * 本脚本只负责调度，实际抓取逻辑全部委托给 script/ 下已有的专用脚本。
- * 路径统一走 config.php 中配置的目录，命令行参数透传给子脚本。
+ * 路径统一走 config.ini 中配置的目录，命令行参数透传给子脚本。
  *
  * 用法：
  *   php update_all.php                        # 更新全部（默认全部启用）
@@ -19,7 +19,8 @@
  *   php update_all.php --skip-analyze         # 跳过回撤分析报告生成 + 跳过 index.html
  *   php update_all.php --skip-index-html      # 只跳过 index.html，回撤分析照常
  *   php update_all.php --funds=008114,050025  # 只更新指定基金（逗号分隔代码）
- *   php update_all.php --only-analyze         # 只跑回撤分析（不抓新数据）
+ *   php update_all.php --only-analyze         # 只跑回撤分析 + index.html（不抓新数据）
+ *   php update_all.php --only-drawdown        # 只跑 return_drawdown_analyze.php，不生成 index.html
  *   php update_all.php --full                 # 所有抓取脚本走全量重抓
  *   php update_all.php --dry-run              # 打印要执行的命令，不真正运行
  *   php update_all.php --verbose              # 显示子脚本的完整输出
@@ -27,8 +28,8 @@
 
 require_once __DIR__ . '/config_loader.php';
 
-// 数据源（基金代码 / 指数文件名）到中文标题的映射集中在项目根目录 config.php 的
-// titles.funds / titles.indexes 下维护；新增数据源时只需改 config.php，无需动本脚本。
+// 数据源（基金代码 / 指数文件名）到中文标题的映射集中在项目根目录 config.ini 的
+// [titles_funds] / [titles_indexes] section 下维护；新增数据源时只改 config.ini，无需动本脚本。
 
 function show_help(): void
 {
@@ -40,7 +41,8 @@ function show_help(): void
   --skip-indexes    跳过指数数据抓取
   --skip-analyze    跳过回撤分析报告生成和 index.html
   --skip-index-html 只跳过 index.html，回撤分析照常
-  --only-analyze    只跑回撤分析（不抓新数据）
+  --only-analyze    只跑回撤分析 + index.html（不抓新数据）
+  --only-drawdown   只跑 return_drawdown_analyze.php（不抓新数据、不生成 index.html）
   --funds=CODE1,CODE2  只更新指定基金（逗号分隔代码）
   --full            所有抓取脚本强制全量重抓
   --dry-run         打印命令但不真正执行，用于预览
@@ -66,6 +68,7 @@ $opts = getopt('', [
     'skip-analyze',
     'skip-index-html',
     'only-analyze',
+    'only-drawdown',
     'funds:',
     'full',
     'dry-run',
@@ -86,14 +89,17 @@ $script_dir      = __DIR__;
 $titles_funds    = $config['titles_funds'];
 $titles_indexes  = $config['titles_indexes'];
 
-$skip_funds     = isset($opts['skip-funds']) || isset($opts['only-analyze']);
-$skip_indexes   = isset($opts['skip-indexes']) || isset($opts['only-analyze']);
-$skip_analyze   = isset($opts['skip-analyze']);
-$skip_index_html = $skip_analyze || isset($opts['skip-index-html']);
-$dry_run        = isset($opts['dry-run']);
-$verbose        = isset($opts['verbose']);
-$full           = isset($opts['full']);
-$only_funds     = isset($opts['funds']) ? array_filter(explode(',', $opts['funds'])) : null;
+// --only-drawdown：只执行 return_drawdown_analyze.php，不抓数据、不重生成 index.html
+$only_drawdown  = isset($opts['only-drawdown']);
+
+$skip_funds      = isset($opts['skip-funds']) || isset($opts['only-analyze']) || $only_drawdown;
+$skip_indexes    = isset($opts['skip-indexes']) || isset($opts['only-analyze']) || $only_drawdown;
+$skip_analyze    = isset($opts['skip-analyze']);
+$skip_index_html = $skip_analyze || isset($opts['skip-index-html']) || $only_drawdown;
+$dry_run         = isset($opts['dry-run']);
+$verbose         = isset($opts['verbose']);
+$full            = isset($opts['full']);
+$only_funds      = isset($opts['funds']) ? array_filter(explode(',', $opts['funds'])) : null;
 
 echo "=== 数据更新脚本 ===\n";
 echo "项目根目录: {$project}\n";
@@ -146,7 +152,7 @@ $run = function (string $script, string $args, string $desc) use ($script_dir, $
 // ---------------------------------------------------------------------------
 if (!$skip_indexes) {
     echo "\n" . str_repeat('=', 50) . "\n";
-    echo "步骤 1/4: 更新指数数据\n";
+    echo "步骤 1/5: 更新指数数据\n";
     echo str_repeat('=', 50);
 
     // 1a. FRED 数据源：DJIA / SP500 / NASDAQ100 / NDXTMC / NDXTMCTR
@@ -168,7 +174,7 @@ if (!$skip_indexes) {
 // ---------------------------------------------------------------------------
 if (!$skip_funds) {
     echo "\n" . str_repeat('=', 50) . "\n";
-    echo "步骤 2/4: 更新基金原始净值数据\n";
+    echo "步骤 2/5: 更新基金原始净值数据\n";
     echo str_repeat('=', 50);
 
     $fund_codes = $only_funds ?? array_keys($titles_funds);
@@ -182,7 +188,7 @@ if (!$skip_funds) {
     }
 
     echo "\n" . str_repeat('=', 50) . "\n";
-    echo "步骤 3/4: 转换基金数据为日线格式\n";
+    echo "步骤 3/5: 转换基金数据为日线格式\n";
     echo str_repeat('=', 50);
 
     foreach ($fund_codes as $code) {
@@ -197,7 +203,7 @@ if (!$skip_funds) {
 // ---------------------------------------------------------------------------
 if (!$skip_analyze) {
     echo "\n" . str_repeat('=', 50) . "\n";
-    echo "步骤 4/4: 生成回撤分析报告\n";
+    echo "步骤 4/5: 生成回撤分析报告\n";
     echo str_repeat('=', 50);
 
     $csv_files = glob($daily_dir . '/*_daily.csv');

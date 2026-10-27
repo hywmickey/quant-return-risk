@@ -55,6 +55,7 @@ $ php script/update_all.php
 
 # 常用变体
 $ php script/update_all.php --only-analyze          # 只跑回撤分析 + 索引页，不抓新数据
+$ php script/update_all.php --only-drawdown         # 只跑回撤分析，不抓新数据、不生成 index.html
 $ php script/update_all.php --skip-funds             # 跳过基金，只更新指数
 $ php script/update_all.php --funds=008114,050025    # 只更新指定基金
 $ php script/update_all.php --skip-index-html        # 只跳过 index.html，回撤分析照常
@@ -76,6 +77,21 @@ $ php script/update_all.php --verbose                # 显示子脚本的完整�
 基金代码与指数文件名到中文标题的映射，集中维护在项目根目录 `config.ini` 的 `[titles_funds]` / `[titles_indexes]` section 下；新增数据源时在对应 section 追加一行即可，无需改动任何脚本。
 
 以下是各子脚本的手动使用说明（供需要单步调试或精细控制时参考）。
+
+### 回撤分析 HTML 报告
+
+`return_drawdown_analyze.php` 为每个数据源生成一份 HTML 报告（默认输出到 `html/`），主要板块：
+
+| 板块 | 内容 |
+|---|---|
+| 整体收益 | 数据区间、期初/期末点位、累计收益率、年化收益率 |
+| 近若干年年化收益率与年化外推 | 近 5~30 年的年化收益率（历史不足的年份跳过），及按复利机械外推的未来涨幅 |
+| 年度涨跌幅 | 每年最后一个交易日相对上一年末的涨跌幅，涨绿跌红着色 |
+| 回撤记录 | 回撤幅度前 10% 的记录，按档位着色，支持点击表头排序、点击行高亮 |
+| 回撤幅度与回撤天数散点图 | 位于回撤记录表下方，横轴为回撤天数、纵轴为回撤幅度 |
+| 关键高低点之间的涨幅与年化 | 回撤最大一档及其间关键节点之间的涨幅、年化与定投收益率 |
+
+散点图中每个点是一条回撤记录，颜色沿用回撤表的【档位】十档配色；鼠标悬停在点上会显示该段回撤的开始日期、结束日期、幅度、天数、修复日期与档位。截至数据末日仍未修复（回撤表【修复日期】为空）的点，用更大的圆点加深红粗边突出显示。
 
 ### 美股指数更新
 
@@ -182,7 +198,7 @@ $ php script/return_drawdown_analyze.php \
 |---|---|
 | `data/portfolio/portfolio_{key}_daily.csv` | 组合日净值序列 |
 | `data/drawdown/portfolio_{key}_daily_drawdown*.csv` | 回撤明细与前 10% 记录 |
-| `html/portfolio_{key}_daily_drawdown_top.html` | 整体收益、年度涨跌幅、回撤记录等完整报告 |
+| `html/portfolio_{key}_daily_drawdown_top.html` | 整体收益、年度涨跌幅、回撤记录、回撤幅度-回撤天数散点图等完整报告 |
 
 注意：投资组合回测不在 `update_all.php` 的一键流程内（该流程的回撤分析只扫描 `data/daily/*_daily.csv`），需在基金数据更新完成后单独执行上述两条命令。
 

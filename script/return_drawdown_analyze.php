@@ -135,6 +135,45 @@ function format_duration_text(int $days): string
 }
 
 /**
+ * 散点图的坐标轴刻度：把区间 [min, max] 按 1 / 2 / 5 × 10^n 的「好看」步长切分，
+ * 返回 [刻度值数组, 刻度标签的小数位数]，首尾刻度会把区间两端包住。
+ */
+function nice_axis_ticks(float $min, float $max, int $target_count): array
+{
+    if ($max <= $min) {
+        $max = $min + 1;
+    }
+
+    $raw_step = ($max - $min) / max(1, $target_count);
+    $exponent = (int) floor(log10($raw_step));
+    $base     = $raw_step / (10 ** $exponent);
+    if ($base <= 1) {
+        $multiplier = 1;
+    } elseif ($base <= 2) {
+        $multiplier = 2;
+    } elseif ($base <= 5) {
+        $multiplier = 5;
+    } else {
+        $multiplier = 10;
+    }
+    $step = $multiplier * (10 ** $exponent);
+
+    $start = floor($min / $step) * $step;
+    $end   = ceil($max / $step) * $step;
+    $count = (int) round(($end - $start) / $step) + 1;
+
+    $ticks = array();
+    for ($i = 0; $i < $count; $i++) {
+        $ticks[] = round($start + $i * $step, 6);
+    }
+
+    // 步长小于 1 时按步长的小数位显示标签（如 0.5 -> 1 位、0.05 -> 2 位），步长 >= 1 时取整数
+    $decimals = max(0, (int) -floor(log10($step)));
+
+    return array($ticks, $decimals);
+}
+
+/**
  * 按列统一小数位数：某一列只要有值带小数点，就把该列所有数值补齐到这一列最大的小数位数
  * （纯整数列、日期列保持原样）
  */
@@ -569,6 +608,11 @@ $html .= ".sort-flag.on{color:#ffd54f}\n";
 // 用内层 inline-block 限宽，这样即使列被下面的数据撑宽，表头文字也不会超过 5em
 $html .= "#drawdown thead th .th-label{display:inline-block;max-width:5em;overflow:hidden;"
     . "text-overflow:ellipsis;white-space:nowrap;vertical-align:bottom}\n";
+// 回撤散点图：SVG 自适应宽度，点的颜色沿用档位色
+$html .= ".chart-note{font-size:13px;color:#555;margin:10px 0 6px}\n";
+$html .= "svg.scatter{width:100%;max-width:880px;height:auto;display:block;font-family:inherit}\n";
+$html .= "svg.scatter circle{cursor:pointer}\n";
+$html .= "svg.scatter circle:hover{stroke-width:2;stroke-opacity:1}\n";
 $html .= "</style>\n</head>\n<body>\n";
 
 // ------ 页面标题与目录 ------
@@ -881,6 +925,109 @@ foreach (align_column_decimals($top_rows, $columns) as $row) {
 
 $html .= "</tbody>\n</table>\n";
 
+// ------ 回撤幅度与回撤天数散点图 ------
+// 横轴为回撤天数（自然日），纵轴为回撤幅度(%)，每个点是一条回撤记录，
+// 颜色沿用回撤表【档位】的十档配色，悬停可看起止日期、幅度与天数
+
+// 先归类再画：recover_date 为空表示截至数据末日仍未涨回起点高点（未修复），
+// 这类点用更大的圆点加深红粗边突出，并排在最后画，避免被已修复的点盖住
+$scatter_points   = array();
+$scatter_days_max = 0;
+$scatter_pct_max  = 0.0;
+foreach ($top_rows as $row) {
+    $days = (int) $row['days'];
+    $pct  = (float) $row['drawdown_pct'];
+    $scatter_points[] = array(
+        'days'     => $days,
+        'pct'      => $pct,
+        'decile'   => (int) $row['rank_decile'],
+        'start'    => $row['date_start'],
+        'end'      => $row['date_end'],
+        'duration' => $days > 30 ? format_duration_text($days) : '',
+        'recover'  => (string) $row['recover_date'],
+    );
+    $scatter_days_max = max($scatter_days_max, $days);
+    $scatter_pct_max  = max($scatter_pct_max, $pct);
+}
+usort($scatter_points, fn(array $a, array $b): int => ($a['recover'] === '') <=> ($b['recover'] === ''));
+
+list($x_ticks, $x_decimals) = nice_axis_ticks(0, max(1, $scatter_days_max), 8);
+list($y_ticks, $y_decimals) = nice_axis_ticks(0, max(1, $scatter_pct_max), 6);
+$x_domain = $x_ticks[count($x_ticks) - 1];
+$y_domain = $y_ticks[count($y_ticks) - 1];
+
+// 画布与绘图区：留出左侧纵轴标签、底部横轴标签的位置
+$svg_w  = 880;
+$svg_h  = 420;
+$pad_l  = 72;
+$pad_r  = 24;
+$pad_t  = 20;
+$pad_b  = 48;
+$plot_w = $svg_w - $pad_l - $pad_r;
+$plot_h = $svg_h - $pad_t - $pad_b;
+
+$to_x = fn(float $days): string => number_format($pad_l + $plot_w * $days / $x_domain, 1, '.', '');
+$to_y = fn(float $pct): string => number_format($pad_t + $plot_h - $plot_h * $pct / $y_domain, 1, '.', '');
+
+$svg  = '<svg class="scatter" viewBox="0 0 ' . $svg_w . ' ' . $svg_h . '" role="img"'
+    . ' aria-label="回撤幅度与回撤天数散点图"'
+    . ' data-last-date="' . htmlspecialchars($last_point['date'], ENT_QUOTES) . '">' . "\n";
+
+// 横向网格线与纵轴刻度
+foreach ($y_ticks as $tick) {
+    $y = $to_y((float) $tick);
+    $svg .= '<line x1="' . $pad_l . '" y1="' . $y . '" x2="' . ($pad_l + $plot_w) . '" y2="' . $y . '" stroke="#e8e8e8"/>' . "\n";
+    $svg .= '<text x="' . ($pad_l - 10) . '" y="' . $y . '" text-anchor="end" dominant-baseline="middle"'
+        . ' font-size="12" fill="#555">' . number_format((float) $tick, $y_decimals, '.', '') . '</text>' . "\n";
+}
+// 纵向网格线与横轴刻度
+foreach ($x_ticks as $tick) {
+    $x = $to_x((float) $tick);
+    $svg .= '<line x1="' . $x . '" y1="' . $pad_t . '" x2="' . $x . '" y2="' . ($pad_t + $plot_h) . '" stroke="#e8e8e8"/>' . "\n";
+    $svg .= '<text x="' . $x . '" y="' . ($pad_t + $plot_h + 18) . '" text-anchor="middle"'
+        . ' font-size="12" fill="#555">' . number_format((float) $tick, $x_decimals, '.', '') . '</text>' . "\n";
+}
+// 坐标轴
+$svg .= '<line x1="' . $pad_l . '" y1="' . ($pad_t + $plot_h) . '" x2="' . ($pad_l + $plot_w) . '" y2="' . ($pad_t + $plot_h) . '" stroke="#999"/>' . "\n";
+$svg .= '<line x1="' . $pad_l . '" y1="' . $pad_t . '" x2="' . $pad_l . '" y2="' . ($pad_t + $plot_h) . '" stroke="#999"/>' . "\n";
+// 轴标题
+$svg .= '<text x="' . ($pad_l + $plot_w / 2) . '" y="' . ($pad_t + $plot_h + 40) . '" text-anchor="middle"'
+    . ' font-size="13" fill="#333">回撤天数（自然日）</text>' . "\n";
+$svg .= '<text x="18" y="' . ($pad_t + $plot_h / 2) . '" text-anchor="middle" font-size="13" fill="#333"'
+    . ' transform="rotate(-90 18 ' . ($pad_t + $plot_h / 2) . ')">回撤幅度(%)</text>' . "\n";
+
+// 数据点：颜色按档位取色；未修复的点半径更大、描边加粗为深红，悬停信息放进 data-* 属性
+foreach ($scatter_points as $point) {
+    $unrecovered = $point['recover'] === '';
+    $svg .= '<circle cx="' . $to_x((float) $point['days']) . '" cy="' . $to_y($point['pct']) . '"'
+        . ' r="' . ($unrecovered ? '6' : '4.5') . '"'
+        . ' fill="' . decile_color($point['decile']) . '"'
+        . ($unrecovered
+            ? ' stroke="#d40000" stroke-width="2"'
+            : ' stroke="#555" stroke-opacity="0.55" stroke-width="0.8"')
+        . ' data-start="' . htmlspecialchars($point['start'], ENT_QUOTES) . '"'
+        . ' data-end="' . htmlspecialchars($point['end'], ENT_QUOTES) . '"'
+        . ' data-pct="' . number_format($point['pct'], 2, '.', '') . '"'
+        . ' data-days="' . $point['days'] . '"'
+        . ' data-duration="' . htmlspecialchars($point['duration'], ENT_QUOTES) . '"'
+        . ' data-recover="' . htmlspecialchars($point['recover'], ENT_QUOTES) . '"'
+        . ' data-decile="' . $point['decile'] . '"></circle>' . "\n";
+}
+
+// 悬停提示框：默认隐藏，鼠标移到点上时由 JS 填内容并定位到点的旁边
+$svg .= '<g id="scatter-tip" style="display:none" pointer-events="none">' . "\n"
+    . '<rect id="scatter-tip-bg" x="0" y="0" rx="4" fill="#fff" fill-opacity="0.96" stroke="#999"/>' . "\n"
+    . '<text id="scatter-tip-text" x="0" y="18" font-size="12" fill="#222"></text>' . "\n"
+    . "</g>\n";
+$svg .= "</svg>\n";
+
+$html .= '<h3>回撤幅度与回撤天数散点图</h3>' . "\n";
+$html .= '<p class="chart-note">每个点是一条回撤记录：横轴为回撤天数（自然日，低点日期 - 起点日期），'
+    . '纵轴为回撤幅度(%)；点的颜色与上表【档位】一致（第 1 档回撤最大为浅红，第 10 档为浅绿）；'
+    . '带深红粗边、略大一些的点表示截至数据末日仍未修复（回撤表【修复日期】为空），'
+    . '鼠标悬停在点上可看该段回撤的开始日期、结束日期、回撤幅度、回撤天数、修复日期与档位。</p>' . "\n";
+$html .= $svg;
+
 // ------ 关键高低点之间的涨幅与年化板块 ------
 // 集合成员：档位为 1（回撤最大的一档）的全部记录，再并入第一条和最后一条回撤记录，
 // 后两条用来把区间补齐到数据的两端。
@@ -1094,6 +1241,56 @@ $html .= "                flag.textContent = other === active ? '\\u25b2' : '\\u
 $html .= "                flag.classList.toggle('on', other === active);\n";
 $html .= "            });\n";
 $html .= "        });\n";
+$html .= "    });\n";
+$html .= "})();\n";
+// 散点图悬停提示：鼠标移到点上时在点旁边弹出提示框，第一行是回撤开始日期；
+// 靠近右边界时翻到点的左侧，靠近上下边界时夹在绘图区内
+$html .= "(function () {\n";
+$html .= "    var svg = document.querySelector('svg.scatter');\n";
+$html .= "    if (!svg) { return; }\n";
+$html .= "    var tip = svg.querySelector('#scatter-tip');\n";
+$html .= "    var bg = svg.querySelector('#scatter-tip-bg');\n";
+$html .= "    var text = svg.querySelector('#scatter-tip-text');\n";
+$html .= "    var dots = svg.querySelectorAll('circle[data-start]');\n";
+$html .= "    if (!tip || !dots.length) { return; }\n";
+$html .= "    var view = svg.viewBox.baseVal;\n";
+$html .= "    dots.forEach(function (dot) {\n";
+$html .= "        dot.addEventListener('mouseenter', function () {\n";
+$html .= "            var lines = [\n";
+$html .= "                '回撤开始日期：' + dot.getAttribute('data-start'),\n";
+$html .= "                '回撤结束日期：' + dot.getAttribute('data-end'),\n";
+$html .= "                '回撤幅度：' + dot.getAttribute('data-pct') + '%',\n";
+$html .= "                '回撤天数：' + dot.getAttribute('data-days') + ' 天'\n";
+$html .= "                    + (dot.getAttribute('data-duration') ? '（' + dot.getAttribute('data-duration') + '）' : '')\n";
+$html .= "            ];\n";
+$html .= "            var recover = dot.getAttribute('data-recover');\n";
+$html .= "            lines.push('修复日期：' + (recover || '未修复（截至 ' + svg.getAttribute('data-last-date') + '）'));\n";
+$html .= "            lines.push('档位：' + dot.getAttribute('data-decile'));\n";
+$html .= "            while (text.firstChild) { text.removeChild(text.firstChild); }\n";
+$html .= "            text.setAttribute('y', 18);\n";
+$html .= "            lines.forEach(function (line, i) {\n";
+$html .= "                var tspan = document.createElementNS(svg.namespaceURI, 'tspan');\n";
+$html .= "                tspan.setAttribute('x', 8);\n";
+$html .= "                tspan.setAttribute('dy', i === 0 ? 0 : 16);\n";
+$html .= "                tspan.textContent = line;\n";
+$html .= "                text.appendChild(tspan);\n";
+$html .= "            });\n";
+$html .= "            tip.style.display = '';   // 先显示才能量出文字宽高\n";
+$html .= "            var box = text.getBBox();\n";
+$html .= "            var w = box.width + 16;\n";
+$html .= "            var h = box.height + 12;\n";
+$html .= "            text.setAttribute('y', 18 + (6 - box.y));   // 顶部留 6px 内边距\n";
+$html .= "            bg.setAttribute('width', w);\n";
+$html .= "            bg.setAttribute('height', h);\n";
+$html .= "            var cx = parseFloat(dot.getAttribute('cx'));\n";
+$html .= "            var cy = parseFloat(dot.getAttribute('cy'));\n";
+$html .= "            var tx = cx + 10;\n";
+$html .= "            if (tx + w > view.width - 2) { tx = cx - 10 - w; }\n";
+$html .= "            tx = Math.max(2, tx);\n";
+$html .= "            var ty = Math.max(2, Math.min(cy - h / 2, view.height - h - 8));\n";
+$html .= "            tip.setAttribute('transform', 'translate(' + tx + ',' + ty + ')');\n";
+$html .= "        });\n";
+$html .= "        dot.addEventListener('mouseleave', function () { tip.style.display = 'none'; });\n";
 $html .= "    });\n";
 $html .= "})();\n";
 $html .= "</script>\n";
