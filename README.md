@@ -12,9 +12,11 @@
 
 适用于量化研究者、投资者和开发者，帮助更清晰地评估金融产品的风险与收益表现。
 
-## 目录配置
+## 配置文件
 
-各脚本默认读写的数据目录统一在项目根目录的 `config.php` 中配置：
+项目根目录的 `config.php` 统一维护所有运行时配置，经 `script/config_loader.php` 解析后暴露给各脚本使用。
+
+### 数据目录（`dirs`）
 
 | 配置键 | 默认目录 | 用途 |
 |---|---|---|
@@ -23,9 +25,52 @@
 | `fund` | `data/fund` | 基金原始净值 CSV |
 | `html` | `html` | 回撤分析 HTML 报告输出 |
 
-目录可写相对路径（相对项目根目录解析）或绝对路径；修改 `config.php` 无需改动脚本。命令行显式传入的 `--in` / `--out` 等参数优先级高于该配置。
+目录可写相对路径（相对项目根目录解析）或绝对路径；命令行显式传入的 `--in` / `--out` 等参数优先级高于该配置。
+
+### 数据源标题映射（`titles`）
+
+`update_all.php` 回撤分析时需要为每个数据源传入 `--title` 参数，对应关系集中维护在 `titles` 下：
+
+| 配置键 | 内容 | 说明 |
+|---|---|---|
+| `titles.funds` | `基金代码 => 中文标题` | 数组顺序即批量抓取顺序 |
+| `titles.indexes` | `CSV 文件名 => 中文标题` | 文件名需与 `data/daily/` 下的文件完全一致 |
+
+新增数据源时在对应数组追加一行即可，无需改动任何脚本。
 
 ## 数据分析
+
+### 一键更新全部数据（推荐）
+
+`script/update_all.php` 整合了 README.md 中描述的所有数据更新步骤，一条命令完成从抓取到报告生成的全流程：
+
+```bash
+# 更新全部（指数抓取 → 基金抓取 → 基金转换 → 回撤分析 → 索引页）
+$ php script/update_all.php
+
+# 常用变体
+$ php script/update_all.php --only-analyze          # 只跑回撤分析 + 索引页，不抓新数据
+$ php script/update_all.php --skip-funds             # 跳过基金，只更新指数
+$ php script/update_all.php --funds=008114,050025    # 只更新指定基金
+$ php script/update_all.php --skip-index-html        # 只跳过 index.html，回撤分析照常
+$ php script/update_all.php --full                   # 所有抓取脚本走全量重抓
+$ php script/update_all.php --dry-run                # 预览将执行什么命令（不真跑）
+$ php script/update_all.php --verbose                # 显示子脚本的完整输出
+```
+
+执行流程（5 步，按顺序串行）：
+
+| 步骤 | 内容 | 涉及脚本 |
+|---|---|---|
+| 1/5 | 指数增量更新 | `fetch_us_indexes.php`（美股三大指数 + NDXTMC/NDXTMCTR）、`fetch_yahoo_index.php`（NYSE FANG+）、`fetch_msci_usa50.php`（MSCI USA 50） |
+| 2/5 | 基金原始净值抓取 | `get_fund_data.php`（循环处理所有已配置基金） |
+| 3/5 | 基金数据转换为日线格式 | `convert_fund.php` |
+| 4/5 | 回撤分析报告生成 | `return_drawdown_analyze.php`（自动扫描 `data/daily/*_daily.csv`） |
+| 5/5 | 重生成 `html/index.html` 索引页 | 内置逻辑（自动扫描 `html/*_drawdown_top.html`，按「指数/基金」分组） |
+
+基金代码与指数文件名到中文标题的映射，集中维护在项目根目录 `config.php` 的 `titles.funds` / `titles.indexes` 下；新增数据源时在对应数组追加一行即可，无需改动任何脚本。
+
+以下是各子脚本的手动使用说明（供需要单步调试或精细控制时参考）。
 
 ### 美股指数更新
 
