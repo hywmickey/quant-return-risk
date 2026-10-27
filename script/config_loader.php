@@ -49,10 +49,11 @@ if (!function_exists('quant_config')) {
 
         // 内置默认目录的唯一定义处；config.ini 中的配置可覆盖
         $defaults = [
-            'daily'    => 'data/daily',
-            'drawdown' => 'data/drawdown',
-            'fund'     => 'data/fund',
-            'html'     => 'html',
+            'daily'     => 'data/daily',
+            'drawdown'  => 'data/drawdown',
+            'fund'      => 'data/fund',
+            'html'      => 'html',
+            'portfolio' => 'data/portfolio',
         ];
 
         $resolve = static function (string $path) use ($project_root): string {
@@ -74,6 +75,74 @@ if (!function_exists('quant_config')) {
         // 数据源标题映射：config.ini 中缺省时返回空数组，调用方自行兜底
         $resolved['titles_funds']   = $funds;
         $resolved['titles_indexes'] = $indexes;
+
+        return $resolved;
+    }
+}
+
+if (!function_exists('quant_portfolios')) {
+    /**
+     * 读取 config.ini 中全部 portfolio_* section，解析为投资组合定义
+     *
+     * @return array<string, array{name: string, funds: array<string, float>, rebalance: string, period: string, threshold: float}>
+     *         key 为 section 名的 portfolio_ 后缀（即组合 key）；
+     *         funds 为 基金代码 => 权重（百分数，未除以 100）；
+     *         rebalance 为触发方式（none/period/anniversary/threshold），period 为周期粒度，
+     *         threshold 为偏离阈值（百分点）；各项合法性由调用方校验。
+     *         config.ini 缺失或没有组合定义时返回空数组。
+     */
+    function quant_portfolios(): array
+    {
+        static $resolved = null;
+
+        if ($resolved !== null) {
+            return $resolved;
+        }
+
+        $config_file = dirname(__DIR__) . '/config.ini';
+        $sections    = is_file($config_file)
+            ? parse_ini_file($config_file, true, INI_SCANNER_RAW)
+            : false;
+        if (!is_array($sections)) {
+            $sections = [];
+        }
+
+        $resolved = [];
+        foreach ($sections as $section => $kv) {
+            $section = (string) $section;
+            if (!str_starts_with($section, 'portfolio_') || !is_array($kv)) {
+                continue;
+            }
+            $key = substr($section, strlen('portfolio_'));
+            if ($key === '') {
+                continue;
+            }
+
+            $funds = [];
+            foreach (explode(',', (string) ($kv['funds'] ?? '')) as $pair) {
+                $pair = trim($pair);
+                if ($pair === '') {
+                    continue;
+                }
+                [$code, $weight] = array_pad(explode(':', $pair, 2), 2, '');
+                $code   = trim($code);
+                $weight = trim($weight);
+                if ($code === '' || !is_numeric($weight)) {
+                    continue;
+                }
+                $funds[$code] = (float) $weight;
+            }
+
+            $resolved[$key] = [
+                'name'      => trim((string) ($kv['name'] ?? $key)),
+                'funds'     => $funds,
+                'rebalance' => strtolower(trim((string) ($kv['rebalance'] ?? 'none'))),
+                // 仅 rebalance=period 时生效：monthly / quarterly / semiannual / annual
+                'period'    => strtolower(trim((string) ($kv['period'] ?? 'annual'))),
+                // 仅 rebalance=threshold 时生效：实际权重与目标权重的偏离阈值（百分点）
+                'threshold' => (float) ($kv['threshold'] ?? 0),
+            ];
+        }
 
         return $resolved;
     }
