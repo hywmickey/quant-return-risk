@@ -14,7 +14,7 @@
 
 ## 配置文件
 
-项目根目录的 `config.php` 统一维护所有运行时配置，经 `script/config_loader.php` 解析后暴露给各脚本使用。
+项目根目录的 `config.ini` 统一维护所有运行时配置，经 `script/config_loader.php` 以 `INI_SCANNER_RAW` 模式解析后暴露给各脚本使用。
 
 ### 数据目录（`dirs`）
 
@@ -27,16 +27,16 @@
 
 目录可写相对路径（相对项目根目录解析）或绝对路径；命令行显式传入的 `--in` / `--out` 等参数优先级高于该配置。
 
-### 数据源标题映射（`titles`）
+### 数据源标题映射
 
-`update_all.php` 回撤分析时需要为每个数据源传入 `--title` 参数，对应关系集中维护在 `titles` 下：
+`update_all.php` 回撤分析时需要为每个数据源传入 `--title` 参数，对应关系集中维护在：
 
-| 配置键 | 内容 | 说明 |
+| INI section | 内容 | 说明 |
 |---|---|---|
-| `titles.funds` | `基金代码 => 中文标题` | 数组顺序即批量抓取顺序 |
-| `titles.indexes` | `CSV 文件名 => 中文标题` | 文件名需与 `data/daily/` 下的文件完全一致 |
+| `[titles_funds]` | `基金代码 = 中文标题` | section 内从上到下的顺序即批量抓取顺序 |
+| `[titles_indexes]` | `CSV 文件名 = 中文标题` | 文件名（含 `.csv` 后缀）需与 `data/daily/` 下的文件完全一致 |
 
-新增数据源时在对应数组追加一行即可，无需改动任何脚本。
+新增数据源时在对应 section 追加一行即可，无需改动任何脚本。
 
 ## 数据分析
 
@@ -66,9 +66,9 @@ $ php script/update_all.php --verbose                # 显示子脚本的完整�
 | 2/5 | 基金原始净值抓取 | `get_fund_data.php`（循环处理所有已配置基金） |
 | 3/5 | 基金数据转换为日线格式 | `convert_fund.php` |
 | 4/5 | 回撤分析报告生成 | `return_drawdown_analyze.php`（自动扫描 `data/daily/*_daily.csv`） |
-| 5/5 | 重生成 `html/index.html` 索引页 | 内置逻辑（自动扫描 `html/*_drawdown_top.html`，按「指数/基金」分组） |
+| 5/5 | 重生成 `html/index.html` 索引页 | `generate_index_html.php`（自动扫描 `html/*_drawdown_top.html`，按「指数/基金」分组） |
 
-基金代码与指数文件名到中文标题的映射，集中维护在项目根目录 `config.php` 的 `titles.funds` / `titles.indexes` 下；新增数据源时在对应数组追加一行即可，无需改动任何脚本。
+基金代码与指数文件名到中文标题的映射，集中维护在项目根目录 `config.ini` 的 `[titles_funds]` / `[titles_indexes]` section 下；新增数据源时在对应 section 追加一行即可，无需改动任何脚本。
 
 以下是各子脚本的手动使用说明（供需要单步调试或精细控制时参考）。
 
