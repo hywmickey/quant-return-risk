@@ -50,13 +50,14 @@
 `script/update_all.php` 整合了 README.md 中描述的所有数据更新步骤，一条命令完成从抓取到报告生成的全流程：
 
 ```bash
-# 更新全部（指数抓取 → 基金抓取 → 基金转换 → 回撤分析 → 索引页）
+# 更新全部（指数抓取 → 基金抓取 → 基金转换 → 投资组合回测 → 回撤分析 → 索引页）
 $ php script/update_all.php
 
 # 常用变体
-$ php script/update_all.php --only-analyze          # 只跑回撤分析 + 索引页，不抓新数据
-$ php script/update_all.php --only-drawdown         # 只跑回撤分析，不抓新数据、不生成 index.html
+$ php script/update_all.php --only-analyze          # 只跑回撤分析 + 索引页，不抓新数据、不回测组合
+$ php script/update_all.php --only-drawdown         # 只跑回撤分析，不抓新数据、不回测组合、不生成 index.html
 $ php script/update_all.php --skip-funds             # 跳过基金，只更新指数
+$ php script/update_all.php --skip-portfolio         # 跳过投资组合回测与组合报告
 $ php script/update_all.php --funds=008114,050025    # 只更新指定基金
 $ php script/update_all.php --skip-index-html        # 只跳过 index.html，回撤分析照常
 $ php script/update_all.php --full                   # 所有抓取脚本走全量重抓
@@ -64,15 +65,16 @@ $ php script/update_all.php --dry-run                # 预览将执行什么命�
 $ php script/update_all.php --verbose                # 显示子脚本的完整输出
 ```
 
-执行流程（5 步，按顺序串行）：
+执行流程（6 步，按顺序串行）：
 
 | 步骤 | 内容 | 涉及脚本 |
 |---|---|---|
-| 1/5 | 指数增量更新 | `fetch_us_indexes.php`（美股三大指数 + NDXTMC/NDXTMCTR）、`fetch_yahoo_index.php`（NYSE FANG+）、`fetch_msci_usa50.php`（MSCI USA 50） |
-| 2/5 | 基金原始净值抓取 | `get_fund_data.php`（循环处理所有已配置基金） |
-| 3/5 | 基金数据转换为日线格式 | `convert_fund.php` |
-| 4/5 | 回撤分析报告生成 | `return_drawdown_analyze.php`（自动扫描 `data/daily/*_daily.csv`） |
-| 5/5 | 重生成 `html/index.html` 索引页 | `generate_index_html.php`（自动扫描 `html/*_drawdown_top.html`，按「指数/基金」分组） |
+| 1/6 | 指数增量更新 | `fetch_us_indexes.php`（美股三大指数 + NDXTMC/NDXTMCTR）、`fetch_yahoo_index.php`（NYSE FANG+）、`fetch_msci_usa50.php`（MSCI USA 50） |
+| 2/6 | 基金原始净值抓取 | `get_fund_data.php`（循环处理所有已配置基金） |
+| 3/6 | 基金数据转换为日线格式 | `convert_fund.php` |
+| 4/6 | 投资组合回测 | `portfolio_nav.php`（回测 `config.ini` 中全部 `portfolio_*` 组合，输出到 `data/portfolio/`） |
+| 5/6 | 回撤分析报告生成 | `return_drawdown_analyze.php`（自动扫描 `data/daily/*_daily.csv` 与 `data/portfolio/*_daily.csv`） |
+| 6/6 | 重生成 `html/index.html` 索引页 | `generate_index_html.php`（自动扫描 `html/*_drawdown_top.html`，按「指数/基金」分组） |
 
 基金代码与指数文件名到中文标题的映射，集中维护在项目根目录 `config.ini` 的 `[titles_funds]` / `[titles_indexes]` section 下；新增数据源时在对应 section 追加一行即可，无需改动任何脚本。
 
@@ -200,5 +202,5 @@ $ php script/return_drawdown_analyze.php \
 | `data/drawdown/portfolio_{key}_daily_drawdown*.csv` | 回撤明细与前 10% 记录 |
 | `html/portfolio_{key}_daily_drawdown_top.html` | 整体收益、年度涨跌幅、回撤记录、回撤幅度-回撤天数散点图等完整报告 |
 
-注意：投资组合回测不在 `update_all.php` 的一键流程内（该流程的回撤分析只扫描 `data/daily/*_daily.csv`），需在基金数据更新完成后单独执行上述两条命令。
+注意：投资组合回测已包含在 `update_all.php` 的一键流程内（步骤 4/6 回测组合，步骤 5/6 生成组合报告），只需在需要跳过时加 `--skip-portfolio`；上面的两条命令仅用于手动单步执行。
 
