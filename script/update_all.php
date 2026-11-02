@@ -227,10 +227,16 @@ if (!$skip_analyze) {
     echo "步骤 5/6: 生成回撤分析报告\n";
     echo str_repeat('=', 50);
 
-    $csv_files = glob($daily_dir . '/*_daily.csv');
+    // 目录里既有 *_daily.csv 也有 msci_usa_50_GRTR_DAILY.csv 这类大写后缀，
+    // 直接 glob('*_daily.csv') 在区分大小写的文件系统上会漏掉大写文件，故先取全部 CSV 再大小写不敏感过滤
+    $csv_files = glob($daily_dir . '/*.csv');
     if ($csv_files === false) {
         $csv_files = [];
     }
+    $csv_files = array_values(array_filter(
+        $csv_files,
+        fn(string $path): bool => preg_match('/_daily\.csv$/i', basename($path)) === 1
+    ));
 
     if (empty($csv_files)) {
         echo "\n  ! 未找到 {$daily_dir}/*_daily.csv，跳过回撤分析\n";
