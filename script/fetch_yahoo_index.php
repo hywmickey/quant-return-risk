@@ -8,8 +8,15 @@
  *   Yahoo 的 chart / crumb 接口会按 TLS 指纹识别非浏览器请求并返回 429，
  *   PHP curl 的 TLS 指纹会被判定为机器人；yfinance 内部用 curl_cffi 模拟
  *   Chrome 的 TLS 指纹才能通过。因此本脚本由 PHP 提供统一 CLI 入口、目录
- *   配置与增量合并逻辑，实际 HTTP 抓取委托给 yfinance（需安装 python3 +
- *   yfinance：pip install --user yfinance）。
+ *   配置与增量合并逻辑，实际 HTTP 抓取委托给 yfinance。
+ *
+ * Python 环境：
+ *   解释器优先级：项目根目录 venv/bin/python > 系统 python3（PATH 中第一个）。
+ *   若当前解释器无法 import yfinance，脚本会自动执行下面三步并在完成后继续抓取：
+ *     python3 -m venv <项目根>/venv
+ *     venv/bin/python -m pip install yfinance
+ *     （随后用 venv 的解释器抓取）
+ *   自动安装失败时会打印完整的手动修复命令。
  *
  * 指数配置（key => Yahoo 代码 / 中文名 / 输出文件 / 全量起点）：
  *   nyfang -> ^NYFANG -> data/daily/nyfang_daily.csv （NYSE FANG+ 指数，2014-09-22 发布）
@@ -47,44 +54,154 @@ class YahooIndexFetcher
         'nyfang' => ['symbol' => '^NYFANG', 'name' => 'NYSE FANG+ 指数', 'file' => 'nyfang_daily.csv', 'start' => '2014-09-22'],
     ];
 
+    /** 实际用于抓取的 Python 解释器（checkEnv 后确定，优先项目内 venv） */
+    private string $python = 'python3';
+
+    /** 项目内虚拟环境目录 */
+    private string $venvDir;
+
+    public function __construct(?string $venvDir = null)
+    {
+        $this->venvDir = $venvDir ?? dirname(__DIR__) . '/venv';
+    }
+
     /**
-     * 检查 python3 与 yfinance 是否可用
+     * 检查 Python 环境；缺失时自动创建 venv 并安装 yfinance
      *
-     * 失败时打印真实诊断信息（python3 路径/版本、import 报错、pip 与 yfinance 位置），
-     * 便于定位「pip 显示已装但 import 失败」这类 pip 与 python 不同源 / 不读 user site 的问题
+     * 解释器优先级：项目根 venv/bin/python > 系统 python3。
+     * 当前解释器无法 import yfinance 时，自动执行 venv 创建 + pip install，
+     * 成功后改用 venv 的解释器；失败则抛异常并给出手动修复命令。
      */
     public function checkEnv(): void
     {
-        $py = trim((string) shell_exec('command -v python3 2>/dev/null'));
-        if ($py === '') {
+        $base = $this->findBasePython();
+        if ($base === '') {
             throw new RuntimeException('未找到 python3，请先安装 Python 3');
         }
 
-        $desc  = [['pipe', 'r'], ['pipe', 'w'], ['pipe', 'w']];
-        $check = proc_open([$py, '-c', 'import yfinance'], $desc, $pipes);
-        if (!is_resource($check)) {
-            throw new RuntimeException("无法启动 python3：{$py}");
+        // venv 已存在时优先用它，避免依赖系统环境是否装过 yfinance
+        $venvPy    = $this->venvPythonPath();
+        $candidate = is_file($venvPy) ? $venvPy : $base;
+
+        [$ok, $error] = $this->probeImport($candidate);
+        if ($ok) {
+            $this->python = $candidate;
+            return;
         }
+
+        $this->bootstrapEnv($base, $candidate, $error);
+    }
+
+    /**
+     * 自动创建 venv 并安装 yfinance，成功后把解释器切到 venv
+     */
+    private function bootstrapEnv(string $base, string $candidate, string $firstError): void
+    {
+        echo "[env] {$candidate} 无法 import yfinance（{$firstError}），开始自动安装 ...\n";
+
+        $venvPy = $this->venvPythonPath();
+        if (!is_file($venvPy)) {
+            echo "[env] 创建虚拟环境：{$this->venvDir}\n";
+            $this->runCmd([$base, '-m', 'venv', $this->venvDir], 'python3 -m venv');
+            $venvPy = $this->venvPythonPath();
+        }
+
+        if (!is_file($venvPy)) {
+            throw new RuntimeException(
+                "虚拟环境创建失败，未找到 {$venvPy}\n" . $this->manualInstructions()
+            );
+        }
+
+        echo "[env] 安装 yfinance（首次安装需要几分钟）...\n";
+        $this->runCmd([$venvPy, '-m', 'pip', 'install', '--disable-pip-version-check', 'yfinance'], 'pip install yfinance');
+
+        [$ok, $error] = $this->probeImport($venvPy);
+        if (!$ok) {
+            throw new RuntimeException(
+                "自动安装后仍无法 import yfinance（{$error}）\n" . $this->manualInstructions()
+            );
+        }
+
+        $this->python = $venvPy;
+        echo "[env] 依赖就绪：{$venvPy}\n";
+    }
+
+    /**
+     * 在指定解释器里执行 `import yfinance`，返回 [是否成功, 错误信息]
+     */
+    private function probeImport(string $python): array
+    {
+        $desc = [['pipe', 'r'], ['pipe', 'w'], ['pipe', 'w']];
+        $proc = @proc_open([$python, '-c', 'import yfinance'], $desc, $pipes);
+        if (!is_resource($proc)) {
+            return [false, "无法启动 {$python}"];
+        }
+
         fclose($pipes[0]);
         $stdout = (string) stream_get_contents($pipes[1]);
         $stderr = trim((string) stream_get_contents($pipes[2]));
-        fclose($pipes[1]); fclose($pipes[2]);
-        $code = proc_close($check);
+        fclose($pipes[1]);
+        fclose($pipes[2]);
+        $code = proc_close($proc);
+
+        return [$code === 0, $stderr !== '' ? $stderr : trim($stdout)];
+    }
+
+    /**
+     * 找系统里第一个可用的 python3 / python
+     */
+    private function findBasePython(): string
+    {
+        foreach (['python3', 'python'] as $name) {
+            $path = trim((string) shell_exec('command -v ' . escapeshellarg($name) . ' 2>/dev/null'));
+            if ($path !== '') {
+                return $path;
+            }
+        }
+
+        return '';
+    }
+
+    /**
+     * venv 内的解释器路径（Windows 与 Unix 两种布局都兼容）
+     */
+    private function venvPythonPath(): string
+    {
+        $win = $this->venvDir . '/Scripts/python.exe';
+        if (is_file($win)) {
+            return $win;
+        }
+
+        return $this->venvDir . '/bin/python';
+    }
+
+    /**
+     * 执行安装类命令并把输出直接透传到终端
+     */
+    private function runCmd(array $cmd, string $label): void
+    {
+        $line = implode(' ', array_map('escapeshellarg', $cmd));
+        echo "  {$label}: {$line}\n";
+
+        $code = 0;
+        passthru($line, $code);
 
         if ($code !== 0) {
-            $ver = trim((string) shell_exec(escapeshellarg($py) . ' --version 2>&1'));
-            // yfinance 实际装在哪（pip show 可能指向另一个 python 的环境）
-            $loc = trim((string) shell_exec('command -v pip >/dev/null 2>&1 && pip show yfinance 2>/dev/null | grep -E "^(Location|Version):" | tr "\n" " "'));
-
-            throw new RuntimeException(
-                "python3 无法 import yfinance（exit={$code}）\n"
-                . "  python3 : {$py} ({$ver})\n"
-                . "  stderr  : " . ($stderr !== '' ? $stderr : trim($stdout)) . "\n"
-                . "  yfinance: {$loc}\n"
-                . "修复：用上面这个 python3 自己的 pip 安装，确保装到它能读到的位置：\n"
-                . "  {$py} -m pip install yfinance"
-            );
+            throw new RuntimeException("{$label} 失败（exit {$code}）\n" . $this->manualInstructions());
         }
+    }
+
+    /**
+     * 手动修复命令（自动安装失败时给出）
+     */
+    private function manualInstructions(): string
+    {
+        return "手动修复步骤：\n"
+            . '  cd ' . dirname($this->venvDir) . "\n"
+            . "  python3 -m venv ./venv\n"
+            . "  source venv/bin/activate\n"
+            . "  python3 -m pip install yfinance\n"
+            . "  php script/fetch_yahoo_index.php";
     }
 
     /**
@@ -117,13 +234,13 @@ print(json.dumps(rows))
 PY;
 
         $desc = [['pipe', 'r'], ['pipe', 'w'], ['pipe', 'w']];
-        $proc = proc_open(['python3', '-c', $py], $desc, $pipes, null, [
+        $proc = proc_open([$this->python, '-c', $py], $desc, $pipes, null, [
             'YF_SYMBOL' => $symbol,
             'YF_START'  => $startDate,
             'YF_END'    => $endDate,
         ]);
         if (!is_resource($proc)) {
-            throw new RuntimeException("无法启动 python3 抓取 {$symbol}");
+            throw new RuntimeException("无法启动 {$this->python} 抓取 {$symbol}");
         }
         fclose($pipes[0]);
         $stdout = stream_get_contents($pipes[1]);
@@ -242,7 +359,7 @@ if (PHP_SAPI === 'cli') {
     if (isset($opts['help'])) {
         echo "用法：php fetch_yahoo_index.php [--symbols=nyfang] [--start=2020-01-01] [--end=2026-09-18] [--overlap=7] [--full]\n";
         echo "默认增量更新 config.php 的 daily 目录下全部已配置指数文件。\n";
-        echo "需安装 python3 + yfinance（pip install --user yfinance）。\n";
+        echo "Python 环境缺失时自动创建 <项目根>/venv 并安装 yfinance（已存在 venv 则优先使用）。\n";
         exit(0);
     }
 
