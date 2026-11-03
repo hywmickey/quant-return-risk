@@ -1,0 +1,539 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>网格交易补仓策略计算器</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    background: #f5f7fa;
+    color: #333;
+    padding: 24px;
+    line-height: 1.6;
+  }
+  .container { max-width: 1400px; margin: 0 auto; }
+  h1 {
+    font-size: 24px;
+    margin-bottom: 16px;
+    color: #1a1a2e;
+    border-left: 4px solid #4361ee;
+    padding-left: 12px;
+  }
+  .card {
+    background: #fff;
+    border-radius: 8px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+    padding: 20px;
+    margin-bottom: 20px;
+  }
+  .controls {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 20px;
+    align-items: flex-end;
+  }
+  .control-group {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .control-group label {
+    font-size: 13px;
+    color: #666;
+    font-weight: 500;
+  }
+  .control-group input, .control-group select {
+    padding: 8px 12px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    font-size: 14px;
+    width: 140px;
+    transition: border-color 0.2s;
+  }
+  .control-group input:focus, .control-group select:focus {
+    outline: none;
+    border-color: #4361ee;
+  }
+  .btn {
+    padding: 9px 20px;
+    background: #4361ee;
+    color: #fff;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: 500;
+    transition: background 0.2s;
+  }
+  .btn:hover { background: #3a56d4; }
+  .summary {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 16px;
+    margin-bottom: 20px;
+  }
+  .summary-item {
+    background: linear-gradient(135deg, #f8f9ff 0%, #eef1fe 100%);
+    border-radius: 8px;
+    padding: 16px;
+    border: 1px solid #e4e8fb;
+  }
+  .summary-item .label {
+    font-size: 12px;
+    color: #666;
+    margin-bottom: 4px;
+  }
+  .summary-item .value {
+    font-size: 22px;
+    font-weight: 700;
+    color: #1a1a2e;
+  }
+  .summary-item .value.negative { color: #e63946; }
+  .summary-item .value.positive { color: #2ec4b6; }
+  .table-wrapper {
+    overflow-x: auto;
+    max-height: 600px;
+    overflow-y: auto;
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+  }
+  thead {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+  }
+  th {
+    background: #1a1a2e;
+    color: #fff;
+    padding: 12px 8px;
+    text-align: right;
+    font-weight: 500;
+    white-space: nowrap;
+  }
+  th:first-child { text-align: center; }
+  td {
+    padding: 10px 8px;
+    border-bottom: 1px solid #eee;
+    text-align: right;
+    white-space: nowrap;
+  }
+  td:first-child {
+    text-align: center;
+    font-weight: 600;
+    color: #4361ee;
+  }
+  tbody tr:hover { background: #f8f9ff; }
+  tbody tr:nth-child(even) { background: #fafbfc; }
+  tbody tr:nth-child(even):hover { background: #f0f3ff; }
+  .nav-cell { font-family: "SF Mono", Consolas, monospace; }
+  .loss-ratio-50 {
+    background: #fff3cd !important;
+    font-weight: 700;
+    color: #b8860b !important;
+  }
+  #chart { width: 100%; height: 420px; }
+  .section-title {
+    font-size: 16px;
+    font-weight: 600;
+    margin-bottom: 14px;
+    color: #1a1a2e;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .section-title::before {
+    content: '';
+    width: 3px;
+    height: 16px;
+    background: #4361ee;
+    border-radius: 2px;
+  }
+  .tabs {
+    display: flex;
+    gap: 0;
+    border-bottom: 2px solid #eee;
+    margin-bottom: 16px;
+  }
+  .tab {
+    padding: 10px 20px;
+    cursor: pointer;
+    font-size: 14px;
+    color: #666;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -2px;
+    transition: all 0.2s;
+  }
+  .tab.active {
+    color: #4361ee;
+    border-bottom-color: #4361ee;
+    font-weight: 600;
+  }
+  .tab:hover { color: #4361ee; }
+  .hidden { display: none; }
+  .strategy-desc {
+    font-size: 13px;
+    color: #555;
+    background: #f8f9fa;
+    padding: 12px 16px;
+    border-radius: 6px;
+    margin-bottom: 16px;
+    border-left: 3px solid #4361ee;
+  }
+  .formula-box {
+    background: linear-gradient(135deg, #f8f9ff 0%, #eef1fe 100%);
+    border: 1px solid #e4e8fb;
+    border-radius: 8px;
+    padding: 14px 18px;
+    margin-bottom: 16px;
+    font-size: 13px;
+    color: #1a1a2e;
+    line-height: 1.9;
+  }
+  .formula-box .formula-title {
+    font-weight: 700;
+    font-size: 14px;
+    color: #4361ee;
+    margin-bottom: 6px;
+  }
+  .formula-box code {
+    background: #fff;
+    border: 1px solid #dbe1f5;
+    border-radius: 4px;
+    padding: 2px 8px;
+    font-family: "SF Mono", Consolas, monospace;
+    font-size: 13px;
+    color: #d6336c;
+  }
+  .formula-box .vars {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 4px 20px;
+    margin-top: 8px;
+    font-size: 12.5px;
+    color: #444;
+  }
+  .formula-box .vars span { white-space: nowrap; }
+  .formula-box .vars b { color: #4361ee; font-weight: 600; }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>📊 网格交易补仓策略计算器</h1>
+
+  <!-- 策略说明 -->
+  <div class="card">
+    <div class="strategy-desc" id="strategyDesc">
+      <strong>策略逻辑：</strong>初始净值为 1，每次下跌固定网格比例（默认 5%）时补仓一次。
+      补仓金额的目标是：补仓后累计亏损比率 = 顶点到当前净值亏损比例 × 目标系数。
+      例如目标系数 50% 表示只承担净值亏损的一半，目标系数越小补仓越积极、总亏损比率越低。
+    </div>
+  </div>
+
+  <!-- 参数控制 -->
+  <div class="card">
+    <div class="section-title">参数设置</div>
+    <div class="controls">
+      <div class="control-group">
+        <label>下跌模型</label>
+        <select id="mode">
+          <option value="linear">线性下跌（净值 -= grid）</option>
+          <option value="compound">复利下跌（净值 *= 1-grid）</option>
+        </select>
+      </div>
+      <div class="control-group" id="gridGroup">
+        <label>网格比例 (%)</label>
+        <input type="number" id="grid" value="5" step="0.1" min="0.1" max="50">
+      </div>
+      <div class="control-group">
+        <label>最大回撤比例 (%) <span id="maxStepHint" style="font-size:11px;color:#e63946;"></span></label>
+        <input type="number" id="maxDrawdown" value="50" step="1" min="1" max="99.9">
+      </div>
+      <div class="control-group" id="targetGroup">
+        <label>目标亏损系数 (%)</label>
+        <input type="number" id="targetPct" value="50" step="5" min="10" max="90">
+      </div>
+      <div class="control-group">
+        <label>初始投入金额</label>
+        <input type="number" id="initialInvest" value="1" step="1" min="1">
+      </div>
+      <button class="btn" onclick="calculate()">🚀 计算</button>
+    </div>
+  </div>
+
+  <!-- 汇总指标 -->
+  <div class="card" id="summaryCard">
+    <div class="section-title">最终指标</div>
+    <div class="summary" id="summary"></div>
+  </div>
+
+  <!-- 图表 -->
+  <div class="card">
+    <div class="section-title">趋势图</div>
+    <div id="chart"></div>
+  </div>
+
+  <!-- 数据表格 -->
+  <div class="card">
+    <div class="section-title">详细数据表</div>
+    <div id="formulaBox" class="formula-box"></div>
+    <div class="table-wrapper">
+      <table id="resultTable">
+        <thead>
+          <tr>
+            <th>次数</th>
+            <th>回撤比例</th>
+            <th>增加资金</th>
+            <th>上次总价值</th>
+            <th>当前价值</th>
+            <th>总投入</th>
+            <th>总亏损价值</th>
+            <th>总亏损比率</th>
+          </tr>
+        </thead>
+        <tbody id="tableBody"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
+<script>
+let chartInstance = null;
+
+/**
+ * 根据"最大回撤比例"反推下跌次数
+ *   linear:   lossRatio = step × grid  →  step = floor(lossRatio / grid)
+ *   compound: (1-grid)^step = 1 - lossRatio  →  step = ceil(log(1-lossRatio) / log(1-grid))
+ * 约束：净值必须 > 0 → lossRatio < 100%（由输入框 max=99.9 保证）
+ */
+function getStepFromDrawdown(mode, grid, maxDrawdownRatio) {
+  if (mode === 'linear') {
+    return Math.max(1, Math.floor(maxDrawdownRatio / grid));
+  } else {
+    const navTarget = 1 - maxDrawdownRatio;
+    if (navTarget <= 0) return 1;
+    return Math.max(1, Math.ceil(Math.log(navTarget) / Math.log(1 - grid)));
+  }
+}
+
+function updateMaxStepHint() {
+  const mode = document.getElementById('mode').value;
+  const gridPct = parseFloat(document.getElementById('grid').value) / 100;
+  const ddInput = document.getElementById('maxDrawdown');
+  const ddVal = parseFloat(ddInput.value);
+  if (!(ddVal > 0 && ddVal < 100)) { ddInput.value = 99.9; }
+  const ddRatio = parseFloat(ddInput.value) / 100;
+  const step = getStepFromDrawdown(mode, gridPct, ddRatio);
+  const hint = document.getElementById('maxStepHint');
+  hint.textContent = `（约 ${step} 次下跌）`;
+  if (step > 500) hint.textContent += ' — 次数过多，建议减小回撤比例或增大网格';
+}
+
+function calculate() {
+  const mode = document.getElementById('mode').value;
+  const gridPct = parseFloat(document.getElementById('grid').value) / 100;
+  const ddInput = document.getElementById('maxDrawdown');
+  const ddVal = parseFloat(ddInput.value);
+  const ddRatio = Math.min(99.9, Math.max(0.1, isNaN(ddVal) ? 50 : ddVal)) / 100;
+  ddInput.value = (ddRatio * 100).toFixed(1).replace(/\.0$/, '');
+  const maxStep = getStepFromDrawdown(mode, gridPct, ddRatio);
+  const targetRatio = parseFloat(document.getElementById('targetPct').value) / 100;
+  const initialInvest = parseFloat(document.getElementById('initialInvest').value) || 1;
+
+  const rows = computeGrid(mode, gridPct, maxStep, initialInvest, targetRatio);
+  renderFormula(mode, gridPct, targetRatio);
+  renderTable(rows, targetRatio);
+  renderSummary(rows, targetRatio);
+  renderChart(rows, targetRatio);
+}
+
+function computeGrid(mode, grid, maxStep, initialInvest, targetRatio) {
+  const rows = [];
+  let step = 0, nav = 1.0, lossRatio = 0.0;
+  let invest = initialInvest, prevVal = 0.0, curVal = invest;
+  let totalInvest = invest, lossVal = 0.0, lossRate = 0.0;
+  rows.push(makeRow(step, lossRatio, nav, invest, prevVal, curVal, totalInvest, lossVal, lossRate));
+
+  for (step = 1; step <= maxStep; step++) {
+    const prev = rows[step - 1];
+    if (mode === 'linear') { nav = prev.nav - grid; lossRatio = step * grid; }
+    else { nav = prev.nav * (1 - grid); lossRatio = 1 - nav; }
+
+    prevVal = prev.curVal * (1 - grid);
+    const prevTotal = prev.totalInvest;
+    invest = (lossRatio > 0 && targetRatio > 0)
+      ? Math.max(0, (prevTotal - prevVal) / (lossRatio * targetRatio) - prevTotal)
+      : 0.0;
+    curVal = prevVal + invest;
+    totalInvest = prevTotal + invest;
+    lossVal = totalInvest - curVal;
+    lossRate = totalInvest > 0 ? lossVal / totalInvest : 0.0;
+
+    rows.push(makeRow(step, lossRatio, nav, invest, prevVal, curVal, totalInvest, lossVal, lossRate));
+  }
+  return rows;
+}
+
+function makeRow(step, lossRatio, nav, invest, prevVal, curVal, totalInvest, lossVal, lossRate) {
+  return { step, lossRatio, nav, invest, prevVal, curVal, totalInvest, lossVal, lossRate };
+}
+
+function fmtNum(n, decimals = 6) {
+  if (n === null || n === undefined || isNaN(n)) return '-';
+  return Number(n).toLocaleString('zh-CN', {
+    minimumFractionDigits: decimals,
+    maximumFractionDigits: decimals
+  });
+}
+
+function fmtMoney(n) {
+  return '¥' + Number(n).toLocaleString('zh-CN', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2
+  });
+}
+
+function fmtPct(n) {
+  return (n * 100).toFixed(4) + '%';
+}
+
+function renderFormula(mode, grid, targetRatio) {
+  const modeLabel = mode === 'linear'
+    ? '线性下跌（净值 = 1 − step × grid）'
+    : '复利下跌（净值 = (1 − grid)^step）';
+  const gridPct = (grid * 100).toFixed(1);
+  const targetPct = (targetRatio * 100).toFixed(0);
+
+  document.getElementById('formulaBox').innerHTML = `
+    <div class="formula-title">📐 补仓公式</div>
+    <div>
+      <strong>目标：</strong>补仓后 <code>总亏损比率 = 净值亏损比例 × 目标系数</code>
+    </div>
+    <div>
+      <strong>推导公式：</strong><code>invest = (prevTotal − prevVal) / (lossRatio × targetRatio) − prevTotal</code>
+    </div>
+    <div>
+      <strong>中文直观表达：</strong>
+      <code>增加资金 = (上次总投入 − 上次总价值) ÷ (当前回撤比例 × 目标系数) − 上次总投入</code>
+    </div>
+    <div>
+      <strong>约束：</strong>每补一次仓，总亏损比率精确提升 <code>grid × targetRatio</code>
+      ${mode === 'linear' ? `（本模型下恒等于 <code>${(grid * targetRatio * 100).toFixed(2)}%</code>）` : ''}
+    </div>
+    <div class="vars">
+      <span><b>prevTotal</b> = 上一行累计总投入</span>
+      <span><b>prevVal</b> = 下跌后、补仓前的持仓市值</span>
+      <span><b>lossRatio</b> = 顶点到当前净值的累计亏损比例</span>
+      <span><b>invest</b> = 本次需要补仓的金额</span>
+      <span><b>当前参数：</b>grid = ${gridPct}%，target = ${targetPct}%</span>
+      <span><b>下跌模型：</b>${modeLabel}</span>
+    </div>
+  `;
+}
+
+function renderTable(rows, targetRatio) {
+  const tbody = document.getElementById('tableBody');
+  tbody.innerHTML = rows.map(r => {
+    const isTargetLoss = Math.abs(r.lossRate - targetRatio) < 0.001;
+    return `<tr class="${isTargetLoss ? 'loss-ratio-50' : ''}">
+      <td>${r.step}</td>
+      <td class="nav-cell">${(r.lossRatio * 100).toFixed(2)}%</td>
+      <td class="nav-cell">${r.invest.toFixed(6)}</td>
+      <td class="nav-cell">${r.prevVal.toFixed(6)}</td>
+      <td class="nav-cell">${r.curVal.toFixed(6)}</td>
+      <td class="nav-cell">${r.totalInvest.toFixed(6)}</td>
+      <td class="nav-cell">${r.lossVal.toFixed(6)}</td>
+      <td class="nav-cell" style="color: ${r.lossRate < targetRatio * 0.6 ? '#2ec4b6' : r.lossRate < targetRatio ? '#ff9f1c' : '#e63946'};">${fmtPct(r.lossRate)}</td>
+    </tr>`;
+  }).join('');
+}
+
+function renderSummary(rows, targetRatio) {
+  const last = rows[rows.length - 1];
+  document.getElementById('summary').innerHTML = `
+    <div class="summary-item">
+      <div class="label">最终净值</div>
+      <div class="value ${last.nav >= 1 ? 'positive' : 'negative'}">${last.nav.toFixed(4)}</div>
+    </div>
+    <div class="summary-item">
+      <div class="label">累计亏损比例</div>
+      <div class="value negative">${fmtPct(last.lossRatio)}</div>
+    </div>
+    <div class="summary-item">
+      <div class="label">总投入</div>
+      <div class="value">${fmtMoney(last.totalInvest)}</div>
+    </div>
+    <div class="summary-item">
+      <div class="label">当前价值</div>
+      <div class="value ${last.curVal >= last.totalInvest ? 'positive' : ''}">${fmtMoney(last.curVal)}</div>
+    </div>
+    <div class="summary-item">
+      <div class="label">总亏损价值</div>
+      <div class="value negative">${fmtMoney(last.lossVal)}</div>
+    </div>
+    <div class="summary-item">
+      <div class="label">总亏损比率 / 目标</div>
+      <div class="value ${last.lossRate >= targetRatio ? 'negative' : ''}">${fmtPct(last.lossRate)} / ${(targetRatio*100).toFixed(0)}%</div>
+    </div>
+  `;
+}
+
+function renderChart(rows, targetRatio) {
+  const chartDom = document.getElementById('chart');
+  if (!chartInstance) {
+    chartInstance = echarts.init(chartDom);
+    window.addEventListener('resize', () => chartInstance && chartInstance.resize());
+  }
+
+  const steps = rows.map(r => r.step);
+  const totalInvests = rows.map(r => +r.totalInvest.toFixed(2));
+  const curVals = rows.map(r => +r.curVal.toFixed(2));
+  const lossRates = rows.map(r => +(r.lossRate * 100).toFixed(2));
+  const lossRatios = rows.map(r => +(r.lossRatio * 100).toFixed(2));
+
+  const option = {
+    tooltip: { trigger: 'axis', axisPointer: { type: 'cross' } },
+    legend: { data: ['总投入', '当前价值', '回撤比例', '总亏损比率'], top: 0 },
+    grid: { left: 60, right: 70, top: 50, bottom: 30 },
+    xAxis: { type: 'category', name: '下跌次数', data: steps },
+    yAxis: [
+      { type: 'value', name: '金额', position: 'left' },
+      { type: 'value', name: '比率(%)', position: 'right', min: 0, max: 100 }
+    ],
+    series: [
+      { name: '总投入', type: 'line', data: totalInvests, smooth: true, itemStyle: { color: '#ff9f1c' }, lineStyle: { width: 2 } },
+      { name: '当前价值', type: 'line', data: curVals, smooth: true, itemStyle: { color: '#2ec4b6' }, lineStyle: { width: 2 } },
+      {
+        name: '回撤比例', type: 'line', yAxisIndex: 1, data: lossRatios, smooth: true,
+        itemStyle: { color: '#e63946' }, lineStyle: { width: 2, type: 'dashed' }
+      },
+      {
+        name: '总亏损比率', type: 'line', yAxisIndex: 1, data: lossRates, smooth: true,
+        itemStyle: { color: '#ff6b9d' }, lineStyle: { width: 2, type: 'dashed' }
+      }
+    ]
+  };
+
+  chartInstance.setOption(option, true);
+}
+
+// 参数变化时自动更新次数提示
+['mode', 'grid', 'maxDrawdown'].forEach(id => {
+  const el = document.getElementById(id);
+  if (el) {
+    el.addEventListener('input', updateMaxStepHint);
+    el.addEventListener('change', updateMaxStepHint);
+  }
+});
+
+// 初始化
+updateMaxStepHint();
+calculate();
+</script>
+</body>
+</html>
