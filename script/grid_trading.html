@@ -245,6 +245,13 @@
           <option value="compound">复利下跌（净值 *= 1-grid）</option>
         </select>
       </div>
+      <div class="control-group">
+        <label>输入模式</label>
+        <select id="inputMode">
+          <option value="byGrid">按网格比例 → 反推次数</option>
+          <option value="byBudget">按总投资 → 反推网格与金额</option>
+        </select>
+      </div>
       <div class="control-group" id="gridGroup">
         <label>网格比例 (%)</label>
         <input type="number" id="grid" value="5" step="0.1" min="0.1" max="50">
@@ -257,9 +264,17 @@
         <label>目标亏损系数 (%)</label>
         <input type="number" id="targetPct" value="50" step="5" min="10" max="90">
       </div>
-      <div class="control-group">
+      <div class="control-group" id="initialGroup">
         <label>初始投入金额</label>
         <input type="number" id="initialInvest" value="1" step="1" min="1">
+      </div>
+      <div class="control-group hidden" id="budgetGroup">
+        <label>总投资金额</label>
+        <input type="number" id="totalBudget" value="1000" step="100" min="1">
+      </div>
+      <div class="control-group hidden" id="countGroup">
+        <label>投资次数 <span id="budgetHint" style="font-size:11px;color:#e63946;"></span></label>
+        <input type="number" id="investCount" value="11" step="1" min="2" max="500">
       </div>
       <button class="btn" onclick="calculate()">🚀 计算</button>
     </div>
@@ -287,12 +302,15 @@
           <tr>
             <th>次数</th>
             <th>回撤比例</th>
+            <th>回撤修复涨幅</th>
             <th>增加资金</th>
             <th>上次总价值</th>
             <th>当前价值</th>
             <th>总投入</th>
             <th>总亏损价值</th>
             <th>总亏损比率</th>
+            <th>盈亏平衡涨幅</th>
+            <th>回撤修复收益率</th>
           </tr>
         </thead>
         <tbody id="tableBody"></tbody>
@@ -321,28 +339,101 @@ function getStepFromDrawdown(mode, grid, maxDrawdownRatio) {
   }
 }
 
-function updateMaxStepHint() {
+/**
+ * 反推：已知 最大回撤比例 + 投资次数（含首次建仓）→ 网格比例
+ *   linear:   N-1 次下跌，1 - (N-1)·grid = 1 - D  →  grid = D / (N-1)
+ *   compound: (1-grid)^(N-1) = 1 - D              →  grid = 1 - (1-D)^(1/(N-1))
+ */
+function getGridFromBudget(mode, maxDrawdownRatio, investCount) {
+  const drops = investCount - 1;
+  if (drops <= 0 || !(maxDrawdownRatio > 0 && maxDrawdownRatio < 1)) return null;
+  const g = mode === 'linear'
+    ? maxDrawdownRatio / drops
+    : 1 - Math.pow(1 - maxDrawdownRatio, 1 / drops);
+  return (g > 0 && g < 1) ? g : null;
+}
+
+function updateHints() {
   const mode = document.getElementById('mode').value;
-  const gridPct = parseFloat(document.getElementById('grid').value) / 100;
+  const inputMode = document.getElementById('inputMode').value;
   const ddInput = document.getElementById('maxDrawdown');
   const ddVal = parseFloat(ddInput.value);
   if (!(ddVal > 0 && ddVal < 100)) { ddInput.value = 99.9; }
   const ddRatio = parseFloat(ddInput.value) / 100;
-  const step = getStepFromDrawdown(mode, gridPct, ddRatio);
-  const hint = document.getElementById('maxStepHint');
-  hint.textContent = `（约 ${step} 次下跌）`;
-  if (step > 500) hint.textContent += ' — 次数过多，建议减小回撤比例或增大网格';
+
+  const stepHint = document.getElementById('maxStepHint');
+  const budgetHint = document.getElementById('budgetHint');
+
+  if (inputMode === 'byBudget') {
+    stepHint.textContent = '';
+    const countInput = document.getElementById('investCount');
+    let count = Math.round(parseFloat(countInput.value));
+    if (!(count >= 2)) { count = 2; }
+    if (count > 500) { count = 500; }
+    countInput.value = count;
+    const g = getGridFromBudget(mode, ddRatio, count);
+    budgetHint.textContent = g
+      ? `（推算网格 ${(g * 100).toFixed(2)}%，共 ${count - 1} 次下跌）`
+      : '（参数无效）';
+  } else {
+    budgetHint.textContent = '';
+    const gridPct = parseFloat(document.getElementById('grid').value) / 100;
+    const step = getStepFromDrawdown(mode, gridPct, ddRatio);
+    stepHint.textContent = `（约 ${step} 次下跌）`;
+    if (step > 500) stepHint.textContent += ' — 次数过多，建议减小回撤比例或增大网格';
+  }
+}
+
+function updateInputModeVisibility() {
+  const byBudget = document.getElementById('inputMode').value === 'byBudget';
+  document.getElementById('gridGroup').classList.toggle('hidden', byBudget);
+  document.getElementById('initialGroup').classList.toggle('hidden', byBudget);
+  document.getElementById('budgetGroup').classList.toggle('hidden', !byBudget);
+  document.getElementById('countGroup').classList.toggle('hidden', !byBudget);
+  updateHints();
 }
 
 function calculate() {
   const mode = document.getElementById('mode').value;
-  const gridPct = parseFloat(document.getElementById('grid').value) / 100;
+  const inputMode = document.getElementById('inputMode').value;
   const ddInput = document.getElementById('maxDrawdown');
   const ddVal = parseFloat(ddInput.value);
   const ddRatio = Math.min(99.9, Math.max(0.1, isNaN(ddVal) ? 50 : ddVal)) / 100;
   ddInput.value = (ddRatio * 100).toFixed(1).replace(/\.0$/, '');
-  const maxStep = getStepFromDrawdown(mode, gridPct, ddRatio);
   const targetRatio = parseFloat(document.getElementById('targetPct').value) / 100;
+
+  if (inputMode === 'byBudget') {
+    // 总投资 + 投资次数 + 最大回撤 + 目标系数  →  反推网格与每次金额
+    const budgetInput = document.getElementById('totalBudget');
+    const budget = Math.max(1, parseFloat(budgetInput.value) || 1000);
+    const countInput = document.getElementById('investCount');
+    const investCount = Math.min(500, Math.max(2, Math.round(parseFloat(countInput.value) || 11)));
+    countInput.value = investCount;
+
+    const maxStep = investCount - 1;
+    const grid = getGridFromBudget(mode, ddRatio, investCount);
+    if (!grid) { alert('参数无效：无法反推网格比例'); return; }
+
+    // 先按初始投入 = 1 归一化计算，再整体缩放到总投资
+    const normalized = computeGrid(mode, grid, maxStep, 1, targetRatio);
+    const unitTotal = normalized[normalized.length - 1].totalInvest;
+    const rows = scaleRows(normalized, budget / unitTotal);
+
+    renderFormula(mode, grid, targetRatio, {
+      investCount, maxStep, budget,
+      gridFormula: mode === 'linear'
+        ? `grid = 最大回撤 ÷ (投资次数 − 1) = ${(ddRatio * 100).toFixed(2)}% ÷ ${maxStep}`
+        : `grid = 1 − (1 − 最大回撤)^(1/(投资次数−1)) = 1 − (1 − ${(ddRatio * 100).toFixed(2)}%)^(1/${maxStep})`
+    });
+    renderTable(rows, targetRatio);
+    renderSummary(rows, targetRatio);
+    renderChart(rows, targetRatio);
+    return;
+  }
+
+  // 原有模式：按网格比例反推次数
+  const gridPct = parseFloat(document.getElementById('grid').value) / 100;
+  const maxStep = getStepFromDrawdown(mode, gridPct, ddRatio);
   const initialInvest = parseFloat(document.getElementById('initialInvest').value) || 1;
 
   const rows = computeGrid(mode, gridPct, maxStep, initialInvest, targetRatio);
@@ -350,6 +441,18 @@ function calculate() {
   renderTable(rows, targetRatio);
   renderSummary(rows, targetRatio);
   renderChart(rows, targetRatio);
+}
+
+/** 整体缩放金额类字段（净值/回撤比例/亏损比率不受影响） */
+function scaleRows(rows, factor) {
+  return rows.map(r => ({
+    ...r,
+    invest: r.invest * factor,
+    prevVal: r.prevVal * factor,
+    curVal: r.curVal * factor,
+    totalInvest: r.totalInvest * factor,
+    lossVal: r.lossVal * factor
+  }));
 }
 
 function computeGrid(mode, grid, maxStep, initialInvest, targetRatio) {
@@ -399,18 +502,25 @@ function fmtMoney(n) {
 }
 
 function fmtPct(n) {
-  return (n * 100).toFixed(4) + '%';
+  return (n * 100).toFixed(2) + '%';
 }
 
-function renderFormula(mode, grid, targetRatio) {
+function renderFormula(mode, grid, targetRatio, extra) {
   const modeLabel = mode === 'linear'
     ? '线性下跌（净值 = 1 − step × grid）'
     : '复利下跌（净值 = (1 − grid)^step）';
-  const gridPct = (grid * 100).toFixed(1);
-  const targetPct = (targetRatio * 100).toFixed(0);
+  const gridPct = (grid * 100).toFixed(2);
+  const targetPct = (targetRatio * 100).toFixed(2);
+
+  const gridDerive = extra ? `
+    <div>
+      <strong>网格推算：</strong><code>${extra.gridFormula}</code>
+      → grid = <code>${(grid * 100).toFixed(2)}%</code>，共 <code>${extra.maxStep}</code> 次下跌 / <code>${extra.investCount}</code> 次投入
+    </div>` : '';
 
   document.getElementById('formulaBox').innerHTML = `
     <div class="formula-title">📐 补仓公式</div>
+    ${gridDerive}
     <div>
       <strong>目标：</strong>补仓后 <code>总亏损比率 = 净值亏损比例 × 目标系数</code>
     </div>
@@ -436,19 +546,22 @@ function renderFormula(mode, grid, targetRatio) {
   `;
 }
 
-function renderTable(rows, targetRatio) {
+function renderTable(rows, targetRatio, decimals = 2) {
   const tbody = document.getElementById('tableBody');
   tbody.innerHTML = rows.map(r => {
     const isTargetLoss = Math.abs(r.lossRate - targetRatio) < 0.001;
     return `<tr class="${isTargetLoss ? 'loss-ratio-50' : ''}">
       <td>${r.step}</td>
       <td class="nav-cell">${(r.lossRatio * 100).toFixed(2)}%</td>
-      <td class="nav-cell">${r.invest.toFixed(6)}</td>
-      <td class="nav-cell">${r.prevVal.toFixed(6)}</td>
-      <td class="nav-cell">${r.curVal.toFixed(6)}</td>
-      <td class="nav-cell">${r.totalInvest.toFixed(6)}</td>
-      <td class="nav-cell">${r.lossVal.toFixed(6)}</td>
+      <td class="nav-cell">${r.nav > 0 ? fmtPct(r.lossRatio / r.nav) : '-'}</td>
+      <td class="nav-cell">${r.invest.toFixed(decimals)}</td>
+      <td class="nav-cell">${r.prevVal.toFixed(decimals)}</td>
+      <td class="nav-cell">${r.curVal.toFixed(decimals)}</td>
+      <td class="nav-cell">${r.totalInvest.toFixed(decimals)}</td>
+      <td class="nav-cell">${r.lossVal.toFixed(decimals)}</td>
       <td class="nav-cell" style="color: ${r.lossRate < targetRatio * 0.6 ? '#2ec4b6' : r.lossRate < targetRatio ? '#ff9f1c' : '#e63946'};">${fmtPct(r.lossRate)}</td>
+      <td class="nav-cell">${r.curVal > 0 ? fmtPct(r.lossVal / r.curVal) : '-'}</td>
+      <td class="nav-cell" style="color: ${r.nav > 0 && (r.curVal / r.nav - r.totalInvest) >= 0 ? '#2ec4b6' : '#e63946'};">${r.nav > 0 && r.totalInvest > 0 ? fmtPct((r.curVal / r.nav - r.totalInvest) / r.totalInvest) : '-'}</td>
     </tr>`;
   }).join('');
 }
@@ -458,7 +571,7 @@ function renderSummary(rows, targetRatio) {
   document.getElementById('summary').innerHTML = `
     <div class="summary-item">
       <div class="label">最终净值</div>
-      <div class="value ${last.nav >= 1 ? 'positive' : 'negative'}">${last.nav.toFixed(4)}</div>
+      <div class="value ${last.nav >= 1 ? 'positive' : 'negative'}">${last.nav.toFixed(2)}</div>
     </div>
     <div class="summary-item">
       <div class="label">累计亏损比例</div>
@@ -478,7 +591,7 @@ function renderSummary(rows, targetRatio) {
     </div>
     <div class="summary-item">
       <div class="label">总亏损比率 / 目标</div>
-      <div class="value ${last.lossRate >= targetRatio ? 'negative' : ''}">${fmtPct(last.lossRate)} / ${(targetRatio*100).toFixed(0)}%</div>
+      <div class="value ${last.lossRate >= targetRatio ? 'negative' : ''}">${fmtPct(last.lossRate)} / ${(targetRatio*100).toFixed(2)}%</div>
     </div>
   `;
 }
@@ -522,17 +635,25 @@ function renderChart(rows, targetRatio) {
   chartInstance.setOption(option, true);
 }
 
-// 参数变化时自动更新次数提示
-['mode', 'grid', 'maxDrawdown'].forEach(id => {
+// 参数变化时自动更新提示
+['mode', 'grid', 'maxDrawdown', 'investCount'].forEach(id => {
   const el = document.getElementById(id);
   if (el) {
-    el.addEventListener('input', updateMaxStepHint);
-    el.addEventListener('change', updateMaxStepHint);
+    el.addEventListener('input', updateHints);
+    el.addEventListener('change', updateHints);
+  }
+});
+
+// 切换输入模式时显示/隐藏对应字段
+['mode', 'inputMode'].forEach(id => {
+  const el = document.getElementById(id);
+  if (el) {
+    el.addEventListener('change', () => { updateInputModeVisibility(); calculate(); });
   }
 });
 
 // 初始化
-updateMaxStepHint();
+updateInputModeVisibility();
 calculate();
 </script>
 </body>
