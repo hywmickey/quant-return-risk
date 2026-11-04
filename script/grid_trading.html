@@ -138,6 +138,7 @@
   }
   /* 扩大回撤后追加的行：浅蓝背景以区别于原计划行 */
   .row-extended td { background: #e8f4fd !important; }
+  .row-skipped td { background: #f1f3f5; color: #adb5bd; }
   #chart { width: 100%; height: 420px; }
   .section-title {
     font-size: 16px;
@@ -404,8 +405,15 @@
       </table>
     </div>
     <div style="margin-top:14px; display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+      <button class="btn" id="startBtn" onclick="toggleStart()">🕐 开始投资次数</button>
       <button class="btn" id="extendBtn" onclick="toggleExtend()">📈 扩大最大回撤比例</button>
       <button class="btn" onclick="exportHTML()">📄 导出 HTML</button>
+      <span id="startPanel" style="display:none; gap:8px; align-items:center;">
+        <label style="font-size:13px; color:#555;">开始投资的次数</label>
+        <input type="number" id="startStep" step="1" min="0" style="width:80px; padding:6px 8px; border:1px solid #ccc; border-radius:6px;">
+        <button class="btn" onclick="applyStart()">应用</button>
+        <span id="startHint" style="font-size:12px; color:#4361ee;"></span>
+      </span>
       <span id="extendPanel" style="display:none; gap:8px; align-items:center;">
         <label style="font-size:13px; color:#555;">实际最大回撤 (%)</label>
         <input type="number" id="extendDd" step="1" min="1" max="99.9" style="width:90px; padding:6px 8px; border:1px solid #ccc; border-radius:6px;">
@@ -545,7 +553,7 @@ function calculate() {
     const scaleFactor = budget / unitTotal;
     const rows = scaleRows(normalized, scaleFactor);
 
-    lastCalc = { mode, inputMode, grid, targetRatio, initialNav, ddRatio, scaleFactor, initialInvest: 1, maxStep, plannedTotal: rows[rows.length - 1].totalInvest, extendedDd: null };
+    lastCalc = { mode, inputMode, grid, targetRatio, initialNav, ddRatio, scaleFactor, initialInvest: 1, maxStep, plannedTotal: rows[rows.length - 1].totalInvest, extendedDd: null, startStep: null };
     lastRows = rows;
 
     renderFormula(mode, grid, targetRatio, {
@@ -554,10 +562,7 @@ function calculate() {
         ? `网格比例 = 最大回撤 ÷ (投资次数 − 1) = ${(ddRatio * 100).toFixed(2)}% ÷ ${maxStep}`
         : `网格比例 = 1 − (1 − 最大回撤)^(1/(投资次数−1)) = 1 − (1 − ${(ddRatio * 100).toFixed(2)}%)^(1/${maxStep})`
     });
-    renderTable(rows, targetRatio, 2, initialNav, lastCalc.plannedTotal);
-    renderSummary(rows, initialNav);
-    renderChart(rows, targetRatio);
-    updateExtendHint();
+    refreshViews();
     return;
   }
 
@@ -568,14 +573,84 @@ function calculate() {
 
   const rows = computeGrid(mode, gridPct, maxStep, initialInvest, targetRatio);
 
-  lastCalc = { mode, inputMode, grid: gridPct, targetRatio, initialNav, ddRatio, scaleFactor: 1, initialInvest, maxStep, plannedTotal: rows[rows.length - 1].totalInvest, extendedDd: null };
+  lastCalc = { mode, inputMode, grid: gridPct, targetRatio, initialNav, ddRatio, scaleFactor: 1, initialInvest, maxStep, plannedTotal: rows[rows.length - 1].totalInvest, extendedDd: null, startStep: null };
   lastRows = rows;
 
   renderFormula(mode, gridPct, targetRatio);
-  renderTable(rows, targetRatio, 2, initialNav, lastCalc.plannedTotal);
-  renderSummary(rows, initialNav);
-  renderChart(rows, targetRatio);
-  updateExtendHint();
+  refreshViews();
+}
+
+// 统一刷新表格/指标/图表：lastRows 为基准行（原计划+回撤追加），再叠加"开始投资次数"变换
+let lastDisplayRows = null;
+function refreshViews() {
+  if (!lastCalc || !lastRows) return;
+  const c = lastCalc;
+  const rows = c.startStep != null ? applyStartStep(lastRows, c.startStep, c.grid) : lastRows;
+  lastDisplayRows = rows;
+  renderTable(rows, c.targetRatio, 2, c.initialNav, c.plannedTotal, c.extendedDd != null ? c.maxStep : null, c.startStep);
+  renderSummary(rows, c.initialNav);
+  renderChart(rows, c.targetRatio);
+  updateExtendHint(rows[rows.length - 1].totalInvest);
+}
+
+// ========== 开始投资次数（从第 N 次下跌才建仓） ==========
+// N 之前的行清零；第 N 行的增加资金 = 原计划该行总投入；之后的行增加资金不变、其余按原公式递推
+function applyStartStep(rows, startStep, grid) {
+  const out = [];
+  let prevTotal = 0, prevCurVal = 0;
+  for (const r of rows) {
+    const row = { ...r };
+    if (r.step < startStep) {
+      Object.assign(row, { invest: 0, prevVal: 0, curVal: 0, totalInvest: 0, lossVal: 0, lossRate: 0 });
+    } else if (r.step === startStep) {
+      const invest = r.totalInvest; // 原计划该行的累计总投入
+      Object.assign(row, { invest, prevVal: 0, curVal: invest, totalInvest: invest, lossVal: 0, lossRate: 0 });
+    } else {
+      const prevVal = prevCurVal * (1 - grid);
+      const invest = r.invest; // 增加资金保持原计划不变
+      const curVal = prevVal + invest;
+      const totalInvest = prevTotal + invest;
+      const lossVal = totalInvest - curVal;
+      Object.assign(row, { invest, prevVal, curVal, totalInvest, lossVal, lossRate: totalInvest > 0 ? lossVal / totalInvest : 0 });
+    }
+    prevTotal = row.totalInvest;
+    prevCurVal = row.curVal;
+    out.push(row);
+  }
+  return out;
+}
+
+function toggleStart() {
+  const panel = document.getElementById('startPanel');
+  const showing = panel.style.display !== 'none';
+  panel.style.display = showing ? 'none' : 'inline-flex';
+  if (!showing && lastCalc) {
+    const input = document.getElementById('startStep');
+    input.max = lastRows.length - 1;
+    if (!input.value) input.value = lastCalc.startStep != null ? lastCalc.startStep : 1;
+    updateStartHint();
+  }
+}
+
+function updateStartHint() {
+  const hint = document.getElementById('startHint');
+  if (!lastCalc) { hint.textContent = ''; return; }
+  hint.textContent = lastCalc.startStep != null
+    ? `当前从第 ${lastCalc.startStep} 次开始投资（0 表示从头开始）`
+    : '未启用（从第 0 次建仓开始）';
+}
+
+function applyStart() {
+  if (!lastCalc) { alert('请先点击"计算"生成数据'); return; }
+  const maxStep = lastRows.length - 1;
+  const v = parseInt(document.getElementById('startStep').value, 10);
+  if (isNaN(v) || v < 0 || v > maxStep) {
+    alert(`请输入 0 ~ ${maxStep} 之间的整数（0 表示从头开始投资）`);
+    return;
+  }
+  lastCalc.startStep = v > 0 ? v : null;
+  refreshViews();
+  updateStartHint();
 }
 
 // ========== 扩大最大回撤比例（实际回撤超预期时追加行） ==========
@@ -622,10 +697,7 @@ function extendDrawdown() {
 
   c.extendedDd = newDd > plannedDd + 1e-9 ? newDd / 100 : null;
   lastRows = rows;
-  renderTable(rows, c.targetRatio, 2, c.initialNav, c.plannedTotal, c.maxStep);
-  renderSummary(rows, c.initialNav);
-  renderChart(rows, c.targetRatio);
-  updateExtendHint(rows[rows.length - 1].totalInvest);
+  refreshViews();
 }
 
 // ========== 导出 HTML ==========
@@ -644,7 +716,7 @@ function confirmExport() {
 }
 function doExportHTML(name) {
   const c = lastCalc;
-  const rows = lastRows;
+  const rows = lastDisplayRows || lastRows; // 导出当前展示的数据（含"开始投资次数"变换）
   const finalTotal = c.plannedTotal;
   const newTotal = rows[rows.length - 1].totalInvest;
   const fmtP = v => (v * 100).toFixed(2) + '%';
@@ -665,6 +737,9 @@ function doExportHTML(name) {
   } else {
     params.push(['初始投入金额', fmtM(c.initialInvest)]);
   }
+  if (c.startStep != null) {
+    params.push(['开始投资次数', `第 ${c.startStep} 次（第 ${c.startStep} 次之前未投入）`]);
+  }
   if (c.extendedDd != null) {
     params.push(['实际最大回撤比例（扩大后）', fmtP(c.extendedDd)]);
     params.push(['计划总投入', fmtM(c.plannedTotal)]);
@@ -674,7 +749,9 @@ function doExportHTML(name) {
   const headers = ['次数', '净值', '回撤比例', '回撤修复涨幅', '增加资金', '上次总价值', '当前价值', '总投入', '资金使用率', '总亏损价值', '总亏损比率', '盈亏平衡涨幅', '回撤修复收益率'];
   const bodyRows = rows.map(r => {
     const ext = c.extendedDd != null && r.step > c.maxStep;
-    return `<tr${ext ? ' class="ext"' : ''}>
+    const skip = c.startStep != null && r.step < c.startStep;
+    const cls = [ext ? 'ext' : '', skip ? 'skip' : ''].filter(Boolean).join(' ');
+    return `<tr${cls ? ` class="${cls}"` : ''}>
       <td>${r.step}</td>
       <td>${(c.initialNav * r.nav).toFixed(4)}</td>
       <td>${fmtP(r.lossRatio)}</td>
@@ -706,6 +783,7 @@ function doExportHTML(name) {
   .params td { text-align: left; } .params td:nth-child(odd) { font-weight: 600; width: 180px; background: #f5f6fa; }
   .data td { font-family: "SF Mono", Consolas, Menlo, "JetBrains Mono", monospace; font-variant-numeric: tabular-nums; }
   .ext td { background: #e8f4fd; }
+  .skip td { background: #f1f3f5; color: #adb5bd; }
   .note { font-size: 12px; color: #888; margin-top: 16px; }
 </style></head><body>
 <h1>${docTitle}</h1>
@@ -720,7 +798,7 @@ function doExportHTML(name) {
   })()}</table>
 <h2>详细数据表</h2>
 <table class="data"><thead><tr>${headers.map(h => `<th>${h}</th>`).join('')}</tr></thead><tbody>${bodyRows}</tbody></table>
-<p class="note">补仓公式：增加资金 = (上次总投入 − 上次总价值) ÷ (当前回撤比例 × 目标系数) − 上次总投入${c.extendedDd != null ? '；浅蓝背景行为"扩大最大回撤"后追加的行，其资金使用率以原计划总投入为分母（可超过 100%）' : ''}。生成时间：${new Date().toLocaleString('zh-CN')}</p>
+<p class="note">补仓公式：增加资金 = (上次总投入 − 上次总价值) ÷ (当前回撤比例 × 目标系数) − 上次总投入${c.startStep != null ? `；灰色行为"开始投资次数"之前的行（第 ${c.startStep} 次才首次投入，该行增加资金 = 原计划累计总投入）` : ''}${c.extendedDd != null ? '；浅蓝背景行为"扩大最大回撤"后追加的行，其资金使用率以原计划总投入为分母（可超过 100%）' : ''}。生成时间：${new Date().toLocaleString('zh-CN')}</p>
 </body></html>`;
 
   const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
@@ -839,14 +917,15 @@ function renderFormula(mode, grid, targetRatio, extra) {
   `;
 }
 
-function renderTable(rows, targetRatio, decimals = 2, initialNav = 1, plannedTotal = null, baseMaxStep = null) {
+function renderTable(rows, targetRatio, decimals = 2, initialNav = 1, plannedTotal = null, baseMaxStep = null, startStep = null) {
   const tbody = document.getElementById('tableBody');
   // 资金使用率的分母：计划总投入（扩大回撤追加行时保持原计划值，因此可超过 100%）
   const finalTotal = plannedTotal || (rows.length > 0 ? rows[rows.length - 1].totalInvest : 0);
   tbody.innerHTML = rows.map(r => {
     const isOffTrack = r.lossRate > r.lossRatio * targetRatio + 1e-6;
     const isExtended = baseMaxStep != null && r.step > baseMaxStep;
-    const cls = [isOffTrack ? 'loss-ratio-50' : '', isExtended ? 'row-extended' : ''].filter(Boolean).join(' ');
+    const isSkipped = startStep != null && r.step < startStep;
+    const cls = [isOffTrack ? 'loss-ratio-50' : '', isExtended ? 'row-extended' : '', isSkipped ? 'row-skipped' : ''].filter(Boolean).join(' ');
     return `<tr class="${cls}">
       <td>${r.step}</td>
       <td class="nav-cell">${(initialNav * r.nav).toFixed(4)}</td>
