@@ -136,6 +136,8 @@
     font-weight: 700;
     color: #b8860b !important;
   }
+  /* 扩大回撤后追加的行：浅蓝背景以区别于原计划行 */
+  .row-extended td { background: #e8f4fd !important; }
   #chart { width: 100%; height: 420px; }
   .section-title {
     font-size: 16px;
@@ -184,6 +186,7 @@
     margin-bottom: 16px;
     border-left: 3px solid #4361ee;
   }
+  .strategy-desc p { margin: 6px 0; line-height: 1.7; }
   .formula-box {
     background: linear-gradient(135deg, #f8f9ff 0%, #eef1fe 100%);
     border: 1px solid #e4e8fb;
@@ -219,6 +222,82 @@
   }
   .formula-box .vars span { white-space: nowrap; }
   .formula-box .vars b { color: #4361ee; font-weight: 600; }
+
+  /* 参数帮助图标与弹窗 */
+  .help-icon {
+    display: inline-block;
+    width: 16px;
+    height: 16px;
+    line-height: 16px;
+    text-align: center;
+    border-radius: 50%;
+    background: #4361ee;
+    color: #fff;
+    font-size: 11px;
+    font-weight: 700;
+    cursor: pointer;
+    margin-left: 4px;
+    vertical-align: 1px;
+    user-select: none;
+  }
+  .help-icon:hover { background: #3a0ca3; }
+  .modal-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,.45);
+    z-index: 1000;
+    align-items: center;
+    justify-content: center;
+  }
+  .modal-overlay.show { display: flex; }
+  .modal {
+    background: #fff;
+    border-radius: 12px;
+    max-width: 560px;
+    width: 90%;
+    max-height: 80vh;
+    overflow-y: auto;
+    padding: 24px 28px;
+    box-shadow: 0 12px 40px rgba(0,0,0,.25);
+    position: relative;
+  }
+  .modal h3 {
+    margin: 0 0 12px;
+    color: #3a0ca3;
+    font-size: 17px;
+    padding-right: 30px;
+  }
+  .modal .modal-close {
+    position: absolute;
+    top: 14px;
+    right: 16px;
+    border: none;
+    background: none;
+    font-size: 20px;
+    color: #999;
+    cursor: pointer;
+    line-height: 1;
+  }
+  .modal .modal-close:hover { color: #333; }
+  .modal p, .modal li { font-size: 13.5px; line-height: 1.8; color: #444; }
+  .modal ul { padding-left: 20px; margin: 8px 0; }
+  .modal code {
+    background: #f1f3ff;
+    border-radius: 4px;
+    padding: 1px 6px;
+    font-family: "SF Mono", Consolas, monospace;
+    font-size: 12.5px;
+    color: #d6336c;
+  }
+  .modal .tip {
+    background: #f8f9ff;
+    border-left: 3px solid #4361ee;
+    padding: 8px 12px;
+    border-radius: 0 6px 6px 0;
+    margin-top: 10px;
+    font-size: 12.5px;
+  }
 </style>
 </head>
 <body>
@@ -228,9 +307,11 @@
   <!-- 策略说明 -->
   <div class="card">
     <div class="strategy-desc" id="strategyDesc">
-      <strong>策略逻辑：</strong>初始净值为 1，每次下跌固定网格比例（默认 5%）时补仓一次。
-      补仓金额的目标是：补仓后累计亏损比率 = 顶点到当前净值亏损比例 × 目标系数。
-      例如目标系数 50% 表示只承担净值亏损的一半，目标系数越小补仓越积极、总亏损比率越低。
+      <strong>策略逻辑：</strong>
+      <p><b>① 建仓</b>：初始净值为 1，先投入一笔初始资金建仓。</p>
+      <p><b>② 触发补仓</b>：之后净值每下跌一个网格比例（默认 5%），补仓一次。</p>
+      <p><b>③ 补仓目标</b>：每次补仓金额按公式计算，使补仓后 <b>累计亏损比率 = 顶点到当前净值的回撤比例 × 目标系数</b>。</p>
+      <p><b>④ 系数含义</b>：例如目标系数 50% 表示只承担净值亏损的一半；系数越小补仓越积极、总亏损比率越低，但消耗资金也越快。</p>
     </div>
   </div>
 
@@ -239,42 +320,46 @@
     <div class="section-title">参数设置</div>
     <div class="controls">
       <div class="control-group">
-        <label>下跌模型</label>
+        <label>下跌模型<span class="help-icon" data-help="mode">?</span></label>
         <select id="mode">
-          <option value="linear">线性下跌（净值 -= grid）</option>
-          <option value="compound">复利下跌（净值 *= 1-grid）</option>
+          <option value="linear">线性下跌（净值 −= 网格比例）</option>
+          <option value="compound">复利下跌（净值 ×= 1 − 网格比例）</option>
         </select>
       </div>
       <div class="control-group">
-        <label>输入模式</label>
+        <label>输入模式<span class="help-icon" data-help="inputMode">?</span></label>
         <select id="inputMode">
           <option value="byGrid">按网格比例 → 反推次数</option>
           <option value="byBudget">按总投资 → 反推网格与金额</option>
         </select>
       </div>
+      <div class="control-group">
+        <label>初始净值<span class="help-icon" data-help="initialNav">?</span></label>
+        <input type="number" id="initialNav" value="1" step="0.01" min="0.01">
+      </div>
       <div class="control-group" id="gridGroup">
-        <label>网格比例 (%)</label>
+        <label>网格比例 (%)<span class="help-icon" data-help="grid">?</span></label>
         <input type="number" id="grid" value="5" step="0.1" min="0.1" max="50">
       </div>
       <div class="control-group">
-        <label>最大回撤比例 (%) <span id="maxStepHint" style="font-size:11px;color:#e63946;"></span></label>
+        <label>最大回撤比例 (%)<span class="help-icon" data-help="maxDrawdown">?</span> <span id="maxStepHint" style="font-size:11px;color:#e63946;"></span></label>
         <input type="number" id="maxDrawdown" value="50" step="1" min="1" max="99.9">
       </div>
       <div class="control-group" id="targetGroup">
-        <label>目标亏损系数 (%)</label>
+        <label>目标亏损系数 (%)<span class="help-icon" data-help="target">?</span></label>
         <input type="number" id="targetPct" value="50" step="5" min="10" max="90">
       </div>
       <div class="control-group" id="initialGroup">
-        <label>初始投入金额</label>
+        <label>初始投入金额<span class="help-icon" data-help="initial">?</span></label>
         <input type="number" id="initialInvest" value="1" step="1" min="1">
       </div>
       <div class="control-group hidden" id="budgetGroup">
-        <label>总投资金额</label>
-        <input type="number" id="totalBudget" value="1000" step="100" min="1">
+        <label>总投资金额<span class="help-icon" data-help="budget">?</span></label>
+        <input type="number" id="totalBudget" value="10000" step="100" min="1">
       </div>
       <div class="control-group hidden" id="countGroup">
-        <label>投资次数 <span id="budgetHint" style="font-size:11px;color:#e63946;"></span></label>
-        <input type="number" id="investCount" value="11" step="1" min="2" max="500">
+        <label>投资次数<span class="help-icon" data-help="count">?</span> <span id="budgetHint" style="font-size:11px;color:#e63946;"></span></label>
+        <input type="number" id="investCount" value="10" step="1" min="2" max="500">
       </div>
       <button class="btn" onclick="calculate()">🚀 计算</button>
     </div>
@@ -300,28 +385,51 @@
       <table id="resultTable">
         <thead>
           <tr>
-            <th>次数</th>
-            <th>回撤比例</th>
-            <th>回撤修复涨幅</th>
-            <th>增加资金</th>
-            <th>上次总价值</th>
-            <th>当前价值</th>
-            <th>总投入</th>
-            <th>总亏损价值</th>
-            <th>总亏损比率</th>
-            <th>盈亏平衡涨幅</th>
-            <th>回撤修复收益率</th>
+            <th>次数<span class="help-icon" data-help="colStep">?</span></th>
+            <th>净值<span class="help-icon" data-help="colNav">?</span></th>
+            <th>回撤比例<span class="help-icon" data-help="colLossRatio">?</span></th>
+            <th>回撤修复涨幅<span class="help-icon" data-help="colRecoverGain">?</span></th>
+            <th>增加资金<span class="help-icon" data-help="colInvest">?</span></th>
+            <th>上次总价值<span class="help-icon" data-help="colPrevVal">?</span></th>
+            <th>当前价值<span class="help-icon" data-help="colCurVal">?</span></th>
+            <th>总投入<span class="help-icon" data-help="colTotalInvest">?</span></th>
+            <th>资金使用率<span class="help-icon" data-help="colBudgetUsed">?</span></th>
+            <th>总亏损价值<span class="help-icon" data-help="colLossVal">?</span></th>
+            <th>总亏损比率<span class="help-icon" data-help="colLossRate">?</span></th>
+            <th>盈亏平衡涨幅<span class="help-icon" data-help="colBreakeven">?</span></th>
+            <th>回撤修复收益率<span class="help-icon" data-help="colRecoverRate">?</span></th>
           </tr>
         </thead>
         <tbody id="tableBody"></tbody>
       </table>
     </div>
+    <div style="margin-top:14px; display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+      <button class="btn" id="extendBtn" onclick="toggleExtend()">📈 扩大最大回撤比例</button>
+      <button class="btn" onclick="exportHTML()">📄 导出 HTML</button>
+      <span id="extendPanel" style="display:none; gap:8px; align-items:center;">
+        <label style="font-size:13px; color:#555;">实际最大回撤 (%)</label>
+        <input type="number" id="extendDd" step="1" min="1" max="99.9" style="width:90px; padding:6px 8px; border:1px solid #ccc; border-radius:6px;">
+        <button class="btn" onclick="extendDrawdown()">追加计算</button>
+        <span id="extendHint" style="font-size:12px; color:#e63946;"></span>
+      </span>
+    </div>
+  </div>
+</div>
+
+<!-- 参数说明弹窗 -->
+<div class="modal-overlay" id="helpModal">
+  <div class="modal">
+    <button class="modal-close" onclick="closeHelp()">×</button>
+    <h3 id="helpTitle"></h3>
+    <div id="helpBody"></div>
   </div>
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
 <script>
 let chartInstance = null;
+let lastCalc = null; // 最近一次计算的完整参数与基准总投入，用于"扩大最大回撤"
+let lastRows = null; // 当前表格展示的数据行（含追加行），用于导出
 
 /**
  * 根据"最大回撤比例"反推下跌次数
@@ -401,6 +509,9 @@ function calculate() {
   const ddRatio = Math.min(99.9, Math.max(0.1, isNaN(ddVal) ? 50 : ddVal)) / 100;
   ddInput.value = (ddRatio * 100).toFixed(1).replace(/\.0$/, '');
   const targetRatio = parseFloat(document.getElementById('targetPct').value) / 100;
+  const navInput = document.getElementById('initialNav');
+  const initialNav = Math.max(0.01, parseFloat(navInput.value) || 1);
+  navInput.value = initialNav;
 
   if (inputMode === 'byBudget') {
     // 总投资 + 投资次数 + 最大回撤 + 目标系数  →  反推网格与每次金额
@@ -417,17 +528,22 @@ function calculate() {
     // 先按初始投入 = 1 归一化计算，再整体缩放到总投资
     const normalized = computeGrid(mode, grid, maxStep, 1, targetRatio);
     const unitTotal = normalized[normalized.length - 1].totalInvest;
-    const rows = scaleRows(normalized, budget / unitTotal);
+    const scaleFactor = budget / unitTotal;
+    const rows = scaleRows(normalized, scaleFactor);
+
+    lastCalc = { mode, inputMode, grid, targetRatio, initialNav, ddRatio, scaleFactor, initialInvest: 1, maxStep, plannedTotal: rows[rows.length - 1].totalInvest, extendedDd: null };
+    lastRows = rows;
 
     renderFormula(mode, grid, targetRatio, {
       investCount, maxStep, budget,
       gridFormula: mode === 'linear'
-        ? `grid = 最大回撤 ÷ (投资次数 − 1) = ${(ddRatio * 100).toFixed(2)}% ÷ ${maxStep}`
-        : `grid = 1 − (1 − 最大回撤)^(1/(投资次数−1)) = 1 − (1 − ${(ddRatio * 100).toFixed(2)}%)^(1/${maxStep})`
+        ? `网格比例 = 最大回撤 ÷ (投资次数 − 1) = ${(ddRatio * 100).toFixed(2)}% ÷ ${maxStep}`
+        : `网格比例 = 1 − (1 − 最大回撤)^(1/(投资次数−1)) = 1 − (1 − ${(ddRatio * 100).toFixed(2)}%)^(1/${maxStep})`
     });
-    renderTable(rows, targetRatio);
+    renderTable(rows, targetRatio, 2, initialNav, lastCalc.plannedTotal);
     renderSummary(rows, targetRatio);
     renderChart(rows, targetRatio);
+    updateExtendHint();
     return;
   }
 
@@ -437,10 +553,156 @@ function calculate() {
   const initialInvest = parseFloat(document.getElementById('initialInvest').value) || 1;
 
   const rows = computeGrid(mode, gridPct, maxStep, initialInvest, targetRatio);
+
+  lastCalc = { mode, inputMode, grid: gridPct, targetRatio, initialNav, ddRatio, scaleFactor: 1, initialInvest, maxStep, plannedTotal: rows[rows.length - 1].totalInvest, extendedDd: null };
+  lastRows = rows;
+
   renderFormula(mode, gridPct, targetRatio);
-  renderTable(rows, targetRatio);
+  renderTable(rows, targetRatio, 2, initialNav, lastCalc.plannedTotal);
   renderSummary(rows, targetRatio);
   renderChart(rows, targetRatio);
+  updateExtendHint();
+}
+
+// ========== 扩大最大回撤比例（实际回撤超预期时追加行） ==========
+function toggleExtend() {
+  const panel = document.getElementById('extendPanel');
+  const showing = panel.style.display !== 'none';
+  panel.style.display = showing ? 'none' : 'inline-flex';
+  if (!showing) updateExtendHint();
+}
+
+function updateExtendHint(newTotal) {
+  const hint = document.getElementById('extendHint');
+  const input = document.getElementById('extendDd');
+  if (!lastCalc) { hint.textContent = ''; return; }
+  const planned = lastCalc.ddRatio * 100;
+  const cur = (lastCalc.extendedDd || lastCalc.ddRatio) * 100;
+  // 最小值 = 参数设置中的计划回撤比例；等于该值时点击追加计算即清除全部追加行
+  input.min = planned.toFixed(2);
+  if (!input.value || parseFloat(input.value) < planned) input.value = Math.min(99.9, Math.ceil(cur + 5));
+  let text = `计划回撤 ${planned.toFixed(2)}%，计划总投入 ${lastCalc.plannedTotal.toFixed(2)}`;
+  if (lastCalc.extendedDd != null && newTotal != null) {
+    const over = (newTotal / lastCalc.plannedTotal - 1) * 100;
+    text += `，当前回撤 ${cur.toFixed(2)}%，变更总投入 ${newTotal.toFixed(2)}（超支 +${over.toFixed(2)}%）`;
+  }
+  hint.textContent = text;
+}
+
+function extendDrawdown() {
+  if (!lastCalc) { alert('请先点击"计算"生成数据'); return; }
+  const c = lastCalc;
+  const plannedDd = c.ddRatio * 100;
+  const curDd = (c.extendedDd || c.ddRatio) * 100;
+  const newDd = parseFloat(document.getElementById('extendDd').value);
+  if (isNaN(newDd) || newDd < plannedDd - 1e-9 || newDd > 99.9) {
+    alert(`请输入 ${plannedDd.toFixed(2)}% ~ 99.9% 之间的数值（等于计划回撤可清除追加的行）`);
+    return;
+  }
+  if (Math.abs(newDd - curDd) < 1e-9) return; // 无变化
+
+  const newMaxStep = getStepFromDrawdown(c.mode, c.grid, newDd / 100);
+  // 追加/回退行沿用原补仓公式与资金缩放比例；资金使用率分母保持原计划总投入，可超过 100%
+  const normalized = computeGrid(c.mode, c.grid, newMaxStep, c.initialInvest, c.targetRatio);
+  const rows = c.inputMode === 'byBudget' ? scaleRows(normalized, c.scaleFactor) : normalized;
+
+  c.extendedDd = newDd > plannedDd + 1e-9 ? newDd / 100 : null;
+  lastRows = rows;
+  renderTable(rows, c.targetRatio, 2, c.initialNav, c.plannedTotal, c.maxStep);
+  renderSummary(rows, c.targetRatio);
+  renderChart(rows, c.targetRatio);
+  updateExtendHint(rows[rows.length - 1].totalInvest);
+}
+
+// ========== 导出 HTML ==========
+function exportHTML() {
+  if (!lastRows || !lastCalc) { alert('请先点击"计算"生成数据'); return; }
+  const c = lastCalc;
+  const rows = lastRows;
+  const finalTotal = c.plannedTotal;
+  const newTotal = rows[rows.length - 1].totalInvest;
+  const fmtP = v => (v * 100).toFixed(2) + '%';
+  const fmtM = v => v.toFixed(2);
+
+  // 输入参数表
+  const params = [
+    ['下跌模型', c.mode === 'linear' ? '线性下跌（净值 −= 网格比例）' : '复利下跌（净值 ×= 1 − 网格比例）'],
+    ['输入模式', c.inputMode === 'byBudget' ? '按总投资 → 反推网格与金额' : '按网格比例 → 反推次数'],
+    ['初始净值', c.initialNav],
+    ['网格比例', fmtP(c.grid) + (c.inputMode === 'byBudget' ? '（由参数反推）' : '')],
+    ['计划最大回撤比例', fmtP(c.ddRatio)],
+    ['目标亏损系数', fmtP(c.targetRatio)],
+  ];
+  if (c.inputMode === 'byBudget') {
+    params.push(['总投资金额', fmtM(c.plannedTotal)]);
+    params.push(['投资次数（含首次建仓）', c.maxStep + 1]);
+  } else {
+    params.push(['初始投入金额', fmtM(c.initialInvest)]);
+  }
+  if (c.extendedDd != null) {
+    params.push(['实际最大回撤比例（扩大后）', fmtP(c.extendedDd)]);
+    params.push(['计划总投入', fmtM(c.plannedTotal)]);
+    params.push(['变更总投入', fmtM(newTotal) + `（超支 +${((newTotal / c.plannedTotal - 1) * 100).toFixed(2)}%）`]);
+  }
+
+  const headers = ['次数', '净值', '回撤比例', '回撤修复涨幅', '增加资金', '上次总价值', '当前价值', '总投入', '资金使用率', '总亏损价值', '总亏损比率', '盈亏平衡涨幅', '回撤修复收益率'];
+  const bodyRows = rows.map(r => {
+    const ext = c.extendedDd != null && r.step > c.maxStep;
+    return `<tr${ext ? ' class="ext"' : ''}>
+      <td>${r.step}</td>
+      <td>${(c.initialNav * r.nav).toFixed(2)}</td>
+      <td>${fmtP(r.lossRatio)}</td>
+      <td>${r.nav > 0 ? fmtP(r.lossRatio / r.nav) : '-'}</td>
+      <td>${fmtM(r.invest)}</td>
+      <td>${fmtM(r.prevVal)}</td>
+      <td>${fmtM(r.curVal)}</td>
+      <td>${fmtM(r.totalInvest)}</td>
+      <td>${fmtP(r.totalInvest / finalTotal)}</td>
+      <td>${fmtM(r.lossVal)}</td>
+      <td>${fmtP(r.lossRate)}</td>
+      <td>${r.curVal > 0 ? fmtP(r.lossVal / r.curVal) : '-'}</td>
+      <td>${r.nav > 0 && r.totalInvest > 0 ? fmtP((r.curVal / r.nav - r.totalInvest) / r.totalInvest) : '-'}</td>
+    </tr>`;
+  }).join('');
+
+  const html = `<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="UTF-8">
+<title>网格交易补仓计算结果</title>
+<style>
+  body { font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; max-width: 1200px; margin: 24px auto; padding: 0 16px; color: #333; }
+  h1 { font-size: 20px; } h2 { font-size: 16px; margin-top: 24px; }
+  table { border-collapse: collapse; width: 100%; font-size: 13px; }
+  th, td { border: 1px solid #ddd; padding: 6px 10px; text-align: right; }
+  th { background: #4361ee; color: #fff; }
+  td:first-child, th:first-child { text-align: center; }
+  .params td { text-align: left; } .params td:nth-child(odd) { font-weight: 600; width: 180px; background: #f5f6fa; }
+  .data td { font-family: "SF Mono", Consolas, Menlo, "JetBrains Mono", monospace; font-variant-numeric: tabular-nums; }
+  .ext td { background: #e8f4fd; }
+  .note { font-size: 12px; color: #888; margin-top: 16px; }
+</style></head><body>
+<h1>网格交易补仓策略计算结果</h1>
+<h2>输入参数</h2>
+<table class="params">${(() => {
+    const trs = [];
+    for (let i = 0; i < params.length; i += 2) {
+      const a = params[i], b = params[i + 1];
+      trs.push(`<tr><td>${a[0]}</td><td>${a[1]}</td>${b ? `<td>${b[0]}</td><td>${b[1]}</td>` : '<td></td><td></td>'}</tr>`);
+    }
+    return trs.join('');
+  })()}</table>
+<h2>详细数据表</h2>
+<table class="data"><thead><tr>${headers.map(h => `<th>${h}</th>`).join('')}</tr></thead><tbody>${bodyRows}</tbody></table>
+<p class="note">补仓公式：增加资金 = (上次总投入 − 上次总价值) ÷ (当前回撤比例 × 目标系数) − 上次总投入${c.extendedDd != null ? '；浅蓝背景行为"扩大最大回撤"后追加的行，其资金使用率以原计划总投入为分母（可超过 100%）' : ''}。生成时间：${new Date().toLocaleString('zh-CN')}</p>
+</body></html>`;
+
+  const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
+  const a = document.createElement('a');
+  const t = new Date();
+  const pad = n => String(n).padStart(2, '0');
+  a.href = URL.createObjectURL(blob);
+  a.download = `网格交易补仓计算_${t.getFullYear()}${pad(t.getMonth() + 1)}${pad(t.getDate())}_${pad(t.getHours())}${pad(t.getMinutes())}.html`;
+  a.click();
+  URL.revokeObjectURL(a.href);
 }
 
 /** 整体缩放金额类字段（净值/回撤比例/亏损比率不受影响） */
@@ -507,15 +769,15 @@ function fmtPct(n) {
 
 function renderFormula(mode, grid, targetRatio, extra) {
   const modeLabel = mode === 'linear'
-    ? '线性下跌（净值 = 1 − step × grid）'
-    : '复利下跌（净值 = (1 − grid)^step）';
+    ? '线性下跌（净值 = 1 − 次数 × 网格比例）'
+    : '复利下跌（净值 = (1 − 网格比例)^次数）';
   const gridPct = (grid * 100).toFixed(2);
   const targetPct = (targetRatio * 100).toFixed(2);
 
   const gridDerive = extra ? `
     <div>
       <strong>网格推算：</strong><code>${extra.gridFormula}</code>
-      → grid = <code>${(grid * 100).toFixed(2)}%</code>，共 <code>${extra.maxStep}</code> 次下跌 / <code>${extra.investCount}</code> 次投入
+      → 网格比例 = <code>${(grid * 100).toFixed(2)}%</code>，共 <code>${extra.maxStep}</code> 次下跌 / <code>${extra.investCount}</code> 次投入
     </div>` : '';
 
   document.getElementById('formulaBox').innerHTML = `
@@ -532,7 +794,7 @@ function renderFormula(mode, grid, targetRatio, extra) {
       <code>增加资金 = (上次总投入 − 上次总价值) ÷ (当前回撤比例 × 目标系数) − 上次总投入</code>
     </div>
     <div>
-      <strong>约束：</strong>每补一次仓，总亏损比率精确提升 <code>grid × targetRatio</code>
+      <strong>约束：</strong>每补一次仓，总亏损比率精确提升 <code>网格比例 × 目标系数</code>
       ${mode === 'linear' ? `（本模型下恒等于 <code>${(grid * targetRatio * 100).toFixed(2)}%</code>）` : ''}
     </div>
     <div class="vars">
@@ -540,26 +802,32 @@ function renderFormula(mode, grid, targetRatio, extra) {
       <span><b>prevVal</b> = 下跌后、补仓前的持仓市值</span>
       <span><b>lossRatio</b> = 顶点到当前净值的累计亏损比例</span>
       <span><b>invest</b> = 本次需要补仓的金额</span>
-      <span><b>当前参数：</b>grid = ${gridPct}%，target = ${targetPct}%</span>
+      <span><b>当前参数：</b>网格比例 = ${gridPct}%，目标系数 = ${targetPct}%</span>
       <span><b>下跌模型：</b>${modeLabel}</span>
     </div>
   `;
 }
 
-function renderTable(rows, targetRatio, decimals = 2) {
+function renderTable(rows, targetRatio, decimals = 2, initialNav = 1, plannedTotal = null, baseMaxStep = null) {
   const tbody = document.getElementById('tableBody');
+  // 资金使用率的分母：计划总投入（扩大回撤追加行时保持原计划值，因此可超过 100%）
+  const finalTotal = plannedTotal || (rows.length > 0 ? rows[rows.length - 1].totalInvest : 0);
   tbody.innerHTML = rows.map(r => {
-    const isTargetLoss = Math.abs(r.lossRate - targetRatio) < 0.001;
-    return `<tr class="${isTargetLoss ? 'loss-ratio-50' : ''}">
+    const isOffTrack = r.lossRate > r.lossRatio * targetRatio + 1e-6;
+    const isExtended = baseMaxStep != null && r.step > baseMaxStep;
+    const cls = [isOffTrack ? 'loss-ratio-50' : '', isExtended ? 'row-extended' : ''].filter(Boolean).join(' ');
+    return `<tr class="${cls}">
       <td>${r.step}</td>
+      <td class="nav-cell">${(initialNav * r.nav).toFixed(2)}</td>
       <td class="nav-cell">${(r.lossRatio * 100).toFixed(2)}%</td>
       <td class="nav-cell">${r.nav > 0 ? fmtPct(r.lossRatio / r.nav) : '-'}</td>
       <td class="nav-cell">${r.invest.toFixed(decimals)}</td>
       <td class="nav-cell">${r.prevVal.toFixed(decimals)}</td>
       <td class="nav-cell">${r.curVal.toFixed(decimals)}</td>
       <td class="nav-cell">${r.totalInvest.toFixed(decimals)}</td>
+      <td class="nav-cell">${finalTotal > 0 ? fmtPct(r.totalInvest / finalTotal) : '-'}</td>
       <td class="nav-cell">${r.lossVal.toFixed(decimals)}</td>
-      <td class="nav-cell" style="color: ${r.lossRate < targetRatio * 0.6 ? '#2ec4b6' : r.lossRate < targetRatio ? '#ff9f1c' : '#e63946'};">${fmtPct(r.lossRate)}</td>
+      <td class="nav-cell">${fmtPct(r.lossRate)}</td>
       <td class="nav-cell">${r.curVal > 0 ? fmtPct(r.lossVal / r.curVal) : '-'}</td>
       <td class="nav-cell" style="color: ${r.nav > 0 && (r.curVal / r.nav - r.totalInvest) >= 0 ? '#2ec4b6' : '#e63946'};">${r.nav > 0 && r.totalInvest > 0 ? fmtPct((r.curVal / r.nav - r.totalInvest) / r.totalInvest) : '-'}</td>
     </tr>`;
@@ -636,13 +904,15 @@ function renderChart(rows, targetRatio) {
 }
 
 // 参数变化时自动更新提示
-['mode', 'grid', 'maxDrawdown', 'investCount'].forEach(id => {
+['mode', 'grid', 'maxDrawdown', 'investCount', 'initialNav'].forEach(id => {
   const el = document.getElementById(id);
   if (el) {
     el.addEventListener('input', updateHints);
     el.addEventListener('change', updateHints);
   }
 });
+// 初始净值变化时直接重算（只影响净值列展示）
+document.getElementById('initialNav').addEventListener('change', calculate);
 
 // 切换输入模式时显示/隐藏对应字段
 ['mode', 'inputMode'].forEach(id => {
@@ -650,6 +920,236 @@ function renderChart(rows, targetRatio) {
   if (el) {
     el.addEventListener('change', () => { updateInputModeVisibility(); calculate(); });
   }
+});
+
+// ========== 参数帮助弹窗 ==========
+const helpContent = {
+  mode: {
+    title: '下跌模型',
+    html: `
+      <p>决定净值如何逐步下跌，影响整个补仓序列的形态。</p>
+      <ul>
+        <li><b>线性下跌</b>：<code>净值 = 1 − 次数 × 网格比例</code>。每次固定减去网格比例，回撤与次数成正比，第 <code>1 ÷ 网格比例</code> 次后净值归零。适合模拟匀速下跌。</li>
+        <li><b>复利下跌</b>：<code>净值 = (1 − 网格比例) ^ 次数</code>。每次按当前净值打折，越往后每次的实际跌幅越小，净值永远不会跌到 0。更接近真实市场的连续跌法。</li>
+      </ul>
+      <div class="tip">同样的网格比例下，复利模型达到相同回撤需要更多次下跌，补仓资金分布更平缓。</div>`
+  },
+  inputMode: {
+    title: '输入模式',
+    html: `
+      <p>选择"知道什么、反推什么"：</p>
+      <ul>
+        <li><b>按网格比例 → 反推次数</b>：你给定每格下跌幅度，系统根据最大回撤反推共下跌多少次。适合"我打算每跌 5% 补一次"的场景。</li>
+        <li><b>按总投资 → 反推网格与金额</b>：你给定总预算和总投入次数，系统反推出网格比例和每次应投入的金额。适合"我总共只有 1 万元、计划投 11 次"的预算约束场景。</li>
+      </ul>
+      <div class="tip">按投资模式下，先用初始投入 = 1 归一化计算各次投入的比例关系，再整体等比缩放到你的总预算，保证总投入精确等于预算。</div>`
+  },
+  initialNav: {
+    title: '初始净值',
+    html: `
+      <p>标的（基金/股票）在建仓时点的净值，默认 1。</p>
+      <ul>
+        <li>策略内部计算始终以 1 为基准，初始净值只影响<b>详细数据表"净值"列的展示</b>：<code>净值 = 初始净值 × (1 − 回撤比例)</code></li>
+        <li>不影响补仓金额、亏损比率等任何比例类结果——策略对净值是尺度不变的</li>
+      </ul>
+      <div class="tip">例如真实基金净值 1.85，填入后表格净值列就显示 1.85、1.76、1.66... 这样的真实净值轨迹。</div>`
+  },
+  grid: {
+    title: '网格比例 (%)',
+    html: `
+      <p>每触发一次补仓，净值下跌的幅度。例如 5% 表示净值每跌 5% 补一次仓。</p>
+      <ul>
+        <li>网格越大 → 补仓次数越少、单次补仓金额越大，适合波动大的标的。</li>
+        <li>网格越小 → 补仓次数越多、资金摊得越细，但需要更多次下跌才到达最大回撤。</li>
+      </ul>
+      <div class="tip">网格与目标系数共同决定每补一次仓总亏损比率上升多少：<code>网格比例 × 目标系数</code>。例如 5% × 50% = 每步上升 2.5%。</div>`
+  },
+  maxDrawdown: {
+    title: '最大回撤比例 (%)',
+    html: `
+      <p>你预估标的从顶点最多跌多少（即策略覆盖的最坏情况），净值从 1 跌到 <code>1 − 最大回撤</code> 时停止补仓。</p>
+      <ul>
+        <li>按网格模式：与网格比例共同反推下跌次数（线性：<code>次数 = 回撤 ÷ 网格比例</code>；复利：<code>次数 = ln(1−回撤) ÷ ln(1−网格比例)</code>）。</li>
+        <li>按投资模式：与投资次数共同反推网格比例。</li>
+      </ul>
+      <div class="tip">回撤设得越大，需要的后备资金越多。建议参考标的历史最大回撤设定。</div>`
+  },
+  target: {
+    title: '目标亏损系数 (%)',
+    html: `
+      <p>策略核心参数：补仓后，<code>总亏损比率 = 净值回撤比例 × 目标系数</code>。</p>
+      <ul>
+        <li>系数 50%：净值回撤 50% 时，你的总投入只浮亏 25%——只承担净值亏损的一半。</li>
+        <li>系数越小（如 10%）→ 补仓越激进，浮亏越小，但消耗资金越快、总投入越大。</li>
+        <li>系数越大（如 90%）→ 补仓越保守，接近不补仓，浮亏接近净值本身的回撤。</li>
+      </ul>
+      <div class="tip">数学上每补一次仓，总亏损比率精确上升 <code>网格比例 × 系数</code>。系数太小且网格太密时，后期补仓金额会急剧放大，注意总资金是否够用。</div>`
+  },
+  initial: {
+    title: '初始投入金额',
+    html: `
+      <p>第 0 次（建仓时）投入的金额，也是后续补仓金额的基准锚点。</p>
+      <ul>
+        <li>设为 1 时，表格中的金额可直接读作"相对初始投入的倍数"，便于观察资金放大幅度。</li>
+        <li>设为实际金额（如 10000）时，表格直接显示真实金额。</li>
+      </ul>
+      <div class="tip">各次补仓金额与初始投入成固定比例关系（由网格比例、回撤、目标系数决定），改变初始投入只会整体等比缩放，不改变策略结构。</div>`
+  },
+  budget: {
+    title: '总投资金额',
+    html: `
+      <p>你计划投入的总预算（含首次建仓）。系统保证最后一次补仓完成后，<b>累计总投入精确等于该预算</b>。</p>
+      <ul>
+        <li>计算方式：先按初始投入 = 1 跑一遍策略，得到每次投入的比例关系，再整体等比缩放使总和等于预算。</li>
+        <li>首次建仓金额 = 预算 × 归一化比例，自动算出，无需手动填。</li>
+      </ul>`
+  },
+  count: {
+    title: '投资次数',
+    html: `
+      <p>总共买入多少次，<b>含首次建仓</b>。例如 11 次 = 第 0 行建仓 + 10 次下跌补仓。</p>
+      <ul>
+        <li>次数越多 → 反推出的网格越细（<code>网格比例 = 回撤 ÷ (次数 − 1)</code>，线性模型），单次补仓金额越小。</li>
+        <li>次数越少 → 网格越粗，单次补仓金额越大。</li>
+      </ul>
+      <div class="tip">配合总投资金额使用：预算固定时，次数越多资金摊得越薄，但每次补仓的摊薄效果也越弱。</div>`
+  },
+  colStep: {
+    title: '次数',
+    html: `
+      <p>下跌/买入的序号。<b>第 0 次 = 首次建仓</b>（初始投入），之后每触发一次网格下跌序号 +1。</p>
+      <div class="tip">例如"投资次数 11"对应表格第 0 行到第 10 行，共 10 次下跌补仓。</div>`
+  },
+  colNav: {
+    title: '净值',
+    html: `
+      <p>标的在该次下跌后的净值：<code>净值 = 初始净值 × (1 − 回撤比例)</code>。</p>
+      <ul>
+        <li>第 0 行 = 初始净值（默认 1）</li>
+        <li>修改参数区的"初始净值"可显示真实标的的净值轨迹（如 1.85 → 1.76 → ...）</li>
+      </ul>
+      <div class="tip">净值列仅为展示用途，不影响任何金额与比率的计算。</div>`
+  },
+  colLossRatio: {
+    title: '回撤比例',
+    html: `
+      <p>标的净值从顶点（净值 1）累计下跌的比例：<code>回撤比例 = 1 − 当前净值</code>。</p>
+      <ul>
+        <li>线性模型：<code>回撤比例 = 次数 × 网格比例</code></li>
+        <li>复利模型：<code>回撤比例 = 1 − (1 − 网格比例)^次数</code></li>
+      </ul>
+      <div class="tip">这是"标的本身"的亏损口径，与你账户的实际亏损（总亏损比率）是两个不同的概念。</div>`
+  },
+  colRecoverGain: {
+    title: '回撤修复涨幅',
+    html: `
+      <p>标的净值要涨多少才能回到顶点（净值 1）：<code>回撤修复涨幅 = 回撤比例 ÷ 当前净值</code>。</p>
+      <ul>
+        <li>回撤 50% → 需要涨 100% 才能回到前高</li>
+        <li>回撤越深，修复所需涨幅越大且加速放大（非线性）</li>
+      </ul>
+      <div class="tip">与"盈亏平衡涨幅"对比看：由于补仓摊薄了成本，你的盈亏平衡涨幅会远低于这里净值的回撤修复涨幅。</div>`
+  },
+  colInvest: {
+    title: '增加资金',
+    html: `
+      <p>本次下跌后需要追加投入的金额（即本次补仓金额），按补仓公式计算：</p>
+      <p><code>增加资金 = (上次总投入 − 上次总价值) ÷ (当前回撤比例 × 目标系数) − 上次总投入</code></p>
+      <ul>
+        <li>目标是让补仓后的<b>总亏损比率 = 回撤比例 × 目标系数</b></li>
+        <li>若公式算出负数（说明当前仓位已够宽松），自动取 0 表示本次无需补仓</li>
+      </ul>`
+  },
+  colPrevVal: {
+    title: '上次总价值',
+    html: `
+      <p>本次下跌发生后、补仓之前的持仓市值：<code>上次总价值 = 上一行当前价值 × (1 − 网格比例)</code>。</p>
+      <div class="tip">名字里的"上次"指上一次补仓之后持有的那笔仓位，经历本次下跌后缩水到这个值。</div>`
+  },
+  colCurVal: {
+    title: '当前价值',
+    html: `
+      <p>本次补仓完成后的持仓市值：<code>当前价值 = 上次总价值 + 增加资金</code>。</p>
+      <ul>
+        <li>前期通常上升（补仓金额大于下跌缩水）</li>
+        <li>后期可能见顶回落——因为补仓金额随 <code>1 ÷ 回撤比例</code> 衰减，补的钱扛不住净值下跌时就会下降</li>
+      </ul>`
+  },
+  colTotalInvest: {
+    title: '总投入',
+    html: `
+      <p>截至本次，累计投入的本金总和：<code>总投入 = 上次总投入 + 增加资金</code>。永远单调递增。</p>
+      <div class="tip">按总投资模式下，最后一行的总投入精确等于你填的总投资金额。</div>`
+  },
+  colBudgetUsed: {
+    title: '资金使用率',
+    html: `
+      <p>当前累计投入占<b>最终总投入</b>的比例：<code>资金使用率 = 本行总投入 ÷ 最后一行总投入</code>。</p>
+      <ul>
+        <li>按总投资模式下，最后一行恰好为 100%（分母就是你填的总投资金额）</li>
+        <li>直观回答："跌到这个深度时，我的子弹已经打出去多少了"</li>
+        <li>前期消耗快、后期消耗慢——因为补仓金额随回撤加深而递减</li>
+        <li>点击表格下方"📈 扩大最大回撤比例"追加行时，分母仍是<b>原计划总投入</b>，因此追加的行会超过 100%——超出的幅度就是超支的幅度</li>
+      </ul>
+      <div class="tip">配合"回撤比例"列看：可以评估资金消耗速度是否与下跌深度匹配，比如回撤 50% 时资金已用掉 80%，说明资金安排前重后轻。</div>`
+  },
+  colLossVal: {
+    title: '总亏损价值',
+    html: `
+      <p>当前浮亏的金额：<code>总亏损价值 = 总投入 − 当前价值</code>。</p>
+      <div class="tip">这是"亏了多少钱"的绝对值口径，配合总亏损比率（相对口径）一起看。</div>`
+  },
+  colLossRate: {
+    title: '总亏损比率',
+    html: `
+      <p>当前浮亏占总投入的比例：<code>总亏损比率 = 总亏损价值 ÷ 总投入</code>。</p>
+      <ul>
+        <li>策略目标就是让它每步精确等于 <code>回撤比例 × 目标系数</code></li>
+        <li>偏离计划轨道的行会<b>标黄高亮</b>（通常伴随"增加资金 = 0"开始出现）</li>
+      </ul>
+      <div class="tip">偏离计划轨道的行（实际 > 回撤比例 × 目标系数，通常伴随"增加资金 = 0"开始出现）会整行标黄高亮，表示补仓失效，实际亏损会比设定目标恶化得更快。</div>`
+  },
+  colBreakeven: {
+    title: '盈亏平衡涨幅',
+    html: `
+      <p>你的持仓要涨多少才能回本（回到总投入）：<code>盈亏平衡涨幅 = 总亏损价值 ÷ 当前价值</code>。</p>
+      <ul>
+        <li>亏 25% → 需涨 33.33% 回本；亏 50% → 需涨 100% 回本</li>
+        <li>回本所需涨幅永远大于亏损比率本身</li>
+      </ul>
+      <div class="tip">这是"你的账户"维度的回本难度；旁边的"回撤修复涨幅"是"标的净值"维度的回本难度。补仓策略的价值就体现在前者远小于后者。</div>`
+  },
+  colRecoverRate: {
+    title: '回撤修复收益率',
+    html: `
+      <p>假设标的净值从当前位置涨回顶点（净值 1），你整笔投资的最终收益率：</p>
+      <p><code>回撤修复收益率 = (修复后持仓市值 − 总投入) ÷ 总投入</code>，其中修复后市值 = 当前价值 ÷ 当前净值</p>
+      <ul>
+        <li>正值（绿色）：净值回到前高你就赚钱</li>
+        <li>负值（红色）：即使净值回到前高仍未回本</li>
+      </ul>
+      <div class="tip">正常情况下该列全为正且随回撤加深而变大——低位补仓积累的便宜份额，在净值修复时全部兑现为利润，这就是"越跌越买"策略的收益来源。</div>`
+  }
+};
+
+function openHelp(key) {
+  const item = helpContent[key];
+  if (!item) return;
+  document.getElementById('helpTitle').textContent = item.title;
+  document.getElementById('helpBody').innerHTML = item.html;
+  document.getElementById('helpModal').classList.add('show');
+}
+function closeHelp() {
+  document.getElementById('helpModal').classList.remove('show');
+}
+document.querySelectorAll('.help-icon').forEach(el => {
+  el.addEventListener('click', e => { e.preventDefault(); e.stopPropagation(); openHelp(el.dataset.help); });
+});
+document.getElementById('helpModal').addEventListener('click', e => {
+  if (e.target.id === 'helpModal') closeHelp();
+});
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') closeHelp();
 });
 
 // 初始化
