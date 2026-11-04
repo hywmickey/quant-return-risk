@@ -335,7 +335,7 @@
       </div>
       <div class="control-group">
         <label>初始净值<span class="help-icon" data-help="initialNav">?</span></label>
-        <input type="number" id="initialNav" value="1" step="0.01" min="0.01">
+        <input type="number" id="initialNav" value="1.0000" step="0.0001" min="0.0001">
       </div>
       <div class="control-group" id="gridGroup">
         <label>网格比例 (%)<span class="help-icon" data-help="grid">?</span></label>
@@ -425,6 +425,20 @@
   </div>
 </div>
 
+<!-- 导出 HTML：标的名称弹窗 -->
+<div class="modal-overlay" id="exportModal">
+  <div class="modal" style="max-width:420px;">
+    <button class="modal-close" onclick="closeExportModal()">×</button>
+    <h3>导出 HTML</h3>
+    <p style="margin:8px 0; color:#666; font-size:13px;">可填写投资的基金 / 股票 / ETF 名称，将显示在导出文件的标题中（可留空）。</p>
+    <input type="text" id="exportName" placeholder="如：天弘中证红利低波动100联接A" style="width:100%; padding:8px 10px; border:1px solid #ddd; border-radius:6px; font-size:14px; box-sizing:border-box;">
+    <div style="margin-top:14px; display:flex; gap:10px; justify-content:flex-end;">
+      <button class="btn" style="background:#999;" onclick="closeExportModal()">取消</button>
+      <button class="btn" onclick="confirmExport()">导出</button>
+    </div>
+  </div>
+</div>
+
 <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
 <script>
 let chartInstance = null;
@@ -510,8 +524,8 @@ function calculate() {
   ddInput.value = (ddRatio * 100).toFixed(1).replace(/\.0$/, '');
   const targetRatio = parseFloat(document.getElementById('targetPct').value) / 100;
   const navInput = document.getElementById('initialNav');
-  const initialNav = Math.max(0.01, parseFloat(navInput.value) || 1);
-  navInput.value = initialNav;
+  const initialNav = Math.max(0.0001, parseFloat(navInput.value) || 1);
+  navInput.value = initialNav.toFixed(4);
 
   if (inputMode === 'byBudget') {
     // 总投资 + 投资次数 + 最大回撤 + 目标系数  →  反推网格与每次金额
@@ -541,7 +555,7 @@ function calculate() {
         : `网格比例 = 1 − (1 − 最大回撤)^(1/(投资次数−1)) = 1 − (1 − ${(ddRatio * 100).toFixed(2)}%)^(1/${maxStep})`
     });
     renderTable(rows, targetRatio, 2, initialNav, lastCalc.plannedTotal);
-    renderSummary(rows, targetRatio);
+    renderSummary(rows, initialNav);
     renderChart(rows, targetRatio);
     updateExtendHint();
     return;
@@ -559,7 +573,7 @@ function calculate() {
 
   renderFormula(mode, gridPct, targetRatio);
   renderTable(rows, targetRatio, 2, initialNav, lastCalc.plannedTotal);
-  renderSummary(rows, targetRatio);
+  renderSummary(rows, initialNav);
   renderChart(rows, targetRatio);
   updateExtendHint();
 }
@@ -609,7 +623,7 @@ function extendDrawdown() {
   c.extendedDd = newDd > plannedDd + 1e-9 ? newDd / 100 : null;
   lastRows = rows;
   renderTable(rows, c.targetRatio, 2, c.initialNav, c.plannedTotal, c.maxStep);
-  renderSummary(rows, c.targetRatio);
+  renderSummary(rows, c.initialNav);
   renderChart(rows, c.targetRatio);
   updateExtendHint(rows[rows.length - 1].totalInvest);
 }
@@ -617,6 +631,18 @@ function extendDrawdown() {
 // ========== 导出 HTML ==========
 function exportHTML() {
   if (!lastRows || !lastCalc) { alert('请先点击"计算"生成数据'); return; }
+  document.getElementById('exportModal').classList.add('show');
+  document.getElementById('exportName').focus();
+}
+function closeExportModal() {
+  document.getElementById('exportModal').classList.remove('show');
+}
+function confirmExport() {
+  const name = document.getElementById('exportName').value.trim();
+  closeExportModal();
+  doExportHTML(name);
+}
+function doExportHTML(name) {
   const c = lastCalc;
   const rows = lastRows;
   const finalTotal = c.plannedTotal;
@@ -628,7 +654,7 @@ function exportHTML() {
   const params = [
     ['下跌模型', c.mode === 'linear' ? '线性下跌（净值 −= 网格比例）' : '复利下跌（净值 ×= 1 − 网格比例）'],
     ['输入模式', c.inputMode === 'byBudget' ? '按总投资 → 反推网格与金额' : '按网格比例 → 反推次数'],
-    ['初始净值', c.initialNav],
+    ['初始净值', c.initialNav.toFixed(4)],
     ['网格比例', fmtP(c.grid) + (c.inputMode === 'byBudget' ? '（由参数反推）' : '')],
     ['计划最大回撤比例', fmtP(c.ddRatio)],
     ['目标亏损系数', fmtP(c.targetRatio)],
@@ -650,7 +676,7 @@ function exportHTML() {
     const ext = c.extendedDd != null && r.step > c.maxStep;
     return `<tr${ext ? ' class="ext"' : ''}>
       <td>${r.step}</td>
-      <td>${(c.initialNav * r.nav).toFixed(2)}</td>
+      <td>${(c.initialNav * r.nav).toFixed(4)}</td>
       <td>${fmtP(r.lossRatio)}</td>
       <td>${r.nav > 0 ? fmtP(r.lossRatio / r.nav) : '-'}</td>
       <td>${fmtM(r.invest)}</td>
@@ -665,22 +691,24 @@ function exportHTML() {
     </tr>`;
   }).join('');
 
+  const docTitle = name ? `${name} - 网格交易补仓策略计算结果` : '网格交易补仓策略计算结果';
   const html = `<!DOCTYPE html>
 <html lang="zh-CN"><head><meta charset="UTF-8">
-<title>网格交易补仓计算结果</title>
+<title>${docTitle}</title>
 <style>
   body { font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; max-width: 1200px; margin: 24px auto; padding: 0 16px; color: #333; }
   h1 { font-size: 20px; } h2 { font-size: 16px; margin-top: 24px; }
   table { border-collapse: collapse; width: 100%; font-size: 13px; }
   th, td { border: 1px solid #ddd; padding: 6px 10px; text-align: right; }
   th { background: #4361ee; color: #fff; }
+  .data thead th { position: sticky; top: 0; z-index: 10; }
   td:first-child, th:first-child { text-align: center; }
   .params td { text-align: left; } .params td:nth-child(odd) { font-weight: 600; width: 180px; background: #f5f6fa; }
   .data td { font-family: "SF Mono", Consolas, Menlo, "JetBrains Mono", monospace; font-variant-numeric: tabular-nums; }
   .ext td { background: #e8f4fd; }
   .note { font-size: 12px; color: #888; margin-top: 16px; }
 </style></head><body>
-<h1>网格交易补仓策略计算结果</h1>
+<h1>${docTitle}</h1>
 <h2>输入参数</h2>
 <table class="params">${(() => {
     const trs = [];
@@ -699,8 +727,11 @@ function exportHTML() {
   const a = document.createElement('a');
   const t = new Date();
   const pad = n => String(n).padStart(2, '0');
+  // 文件名中的名称需剔除各平台不允许的字符
+  const safeName = name ? name.replace(/[\\/:*?"<>|]/g, '').replace(/\s+/g, '') : '';
+  const namePart = safeName ? `${safeName}_` : '';
   a.href = URL.createObjectURL(blob);
-  a.download = `网格交易补仓计算_${t.getFullYear()}${pad(t.getMonth() + 1)}${pad(t.getDate())}_${pad(t.getHours())}${pad(t.getMinutes())}.html`;
+  a.download = `${namePart}网格交易补仓计算_${t.getFullYear()}${pad(t.getMonth() + 1)}${pad(t.getDate())}_${pad(t.getHours())}${pad(t.getMinutes())}.html`;
   a.click();
   URL.revokeObjectURL(a.href);
 }
@@ -818,7 +849,7 @@ function renderTable(rows, targetRatio, decimals = 2, initialNav = 1, plannedTot
     const cls = [isOffTrack ? 'loss-ratio-50' : '', isExtended ? 'row-extended' : ''].filter(Boolean).join(' ');
     return `<tr class="${cls}">
       <td>${r.step}</td>
-      <td class="nav-cell">${(initialNav * r.nav).toFixed(2)}</td>
+      <td class="nav-cell">${(initialNav * r.nav).toFixed(4)}</td>
       <td class="nav-cell">${(r.lossRatio * 100).toFixed(2)}%</td>
       <td class="nav-cell">${r.nav > 0 ? fmtPct(r.lossRatio / r.nav) : '-'}</td>
       <td class="nav-cell">${r.invest.toFixed(decimals)}</td>
@@ -834,12 +865,13 @@ function renderTable(rows, targetRatio, decimals = 2, initialNav = 1, plannedTot
   }).join('');
 }
 
-function renderSummary(rows, targetRatio) {
+function renderSummary(rows, initialNav = 1) {
   const last = rows[rows.length - 1];
+  const finalNav = last.nav * initialNav;
   document.getElementById('summary').innerHTML = `
     <div class="summary-item">
       <div class="label">最终净值</div>
-      <div class="value ${last.nav >= 1 ? 'positive' : 'negative'}">${last.nav.toFixed(2)}</div>
+      <div class="value ${finalNav >= initialNav ? 'positive' : 'negative'}">${finalNav.toFixed(4)}</div>
     </div>
     <div class="summary-item">
       <div class="label">累计亏损比例</div>
@@ -858,8 +890,8 @@ function renderSummary(rows, targetRatio) {
       <div class="value negative">${fmtMoney(last.lossVal)}</div>
     </div>
     <div class="summary-item">
-      <div class="label">总亏损比率 / 目标</div>
-      <div class="value ${last.lossRate >= targetRatio ? 'negative' : ''}">${fmtPct(last.lossRate)} / ${(targetRatio*100).toFixed(2)}%</div>
+      <div class="label">总亏损比率</div>
+      <div class="value negative">${fmtPct(last.lossRate)}</div>
     </div>
   `;
 }
@@ -1148,8 +1180,14 @@ document.querySelectorAll('.help-icon').forEach(el => {
 document.getElementById('helpModal').addEventListener('click', e => {
   if (e.target.id === 'helpModal') closeHelp();
 });
+document.getElementById('exportModal').addEventListener('click', e => {
+  if (e.target.id === 'exportModal') closeExportModal();
+});
+document.getElementById('exportName').addEventListener('keydown', e => {
+  if (e.key === 'Enter') confirmExport();
+});
 document.addEventListener('keydown', e => {
-  if (e.key === 'Escape') closeHelp();
+  if (e.key === 'Escape') { closeHelp(); closeExportModal(); }
 });
 
 // 初始化
