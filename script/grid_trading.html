@@ -139,6 +139,32 @@
   /* 扩大回撤后追加的行：浅蓝背景以区别于原计划行 */
   .row-extended td { background: #e8f4fd !important; }
   .row-skipped td { background: #f1f3f5; color: #adb5bd; }
+
+  /* 历史回测样式 */
+  .bt-container { margin-top: 16px; }
+  .bt-summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-bottom: 14px; }
+  .bt-card { background: linear-gradient(135deg, #f3f4ff, #fff); border: 1px solid #e0e3ff; border-radius: 10px; padding: 12px 14px; }
+  .bt-card .label { font-size: 12px; color: #6c757d; margin-bottom: 4px; }
+  .bt-card .value { font-size: 18px; font-weight: 700; color: #3a0ca3; }
+  .bt-card .value.positive { color: #2d6a4f; }
+  .bt-card .value.negative { color: #e63946; }
+  .bt-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .bt-table th { background: #4361ee; color: #fff; padding: 9px 10px; text-align: right; font-weight: 600; position: sticky; top: 0; }
+  .bt-table th:first-child, .bt-table td:first-child { text-align: left; }
+  .bt-table td { padding: 7px 10px; border-bottom: 1px solid #eef0f4; text-align: right; font-variant-numeric: tabular-nums; }
+  .bt-table tr:hover td { background: #f8f9ff; }
+  .bt-row-buy td { background: #fff5f5; }
+  .bt-row-dividend td { background: #fffce6; }
+  .bt-row-buy.bt-row-dividend td { background: #fff1e0; }
+  /* 创新低但已超出计划最大回撤：本应加仓却未加仓 */
+  .bt-row-missed td { background: #eef1f5; }
+  .bt-row-missed td:nth-child(4) { color: #868e96; }
+  .bt-row-missed.bt-row-dividend td { background: #f3f0e6; }
+  .bt-warn { background: #fff8e6; border: 1px solid #ffd43b; border-left: 4px solid #f59f00; border-radius: 8px; padding: 12px 14px; margin-bottom: 14px; font-size: 13px; color: #8a5a00; line-height: 1.7; }
+  .upload-area { border: 2px dashed #4361ee; border-radius: 10px; padding: 30px 20px; text-align: center; cursor: pointer; color: #4361ee; transition: .2s; }
+  .upload-area:hover { background: #f3f4ff; border-color: #3a0ca3; }
+  .upload-area input { display: none; }
+  .upload-hint { font-size: 12px; color: #868e96; margin-top: 10px; line-height: 1.5; }
   #chart { width: 100%; height: 420px; }
   .section-title {
     font-size: 16px;
@@ -407,6 +433,7 @@
     <div style="margin-top:14px; display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
       <button class="btn" id="startBtn" onclick="toggleStart()">🕐 开始投资次数</button>
       <button class="btn" id="extendBtn" onclick="toggleExtend()">📈 扩大最大回撤比例</button>
+      <button class="btn" onclick="toggleBacktest()">📊 历史回测</button>
       <button class="btn" onclick="exportHTML()">📄 导出 HTML</button>
       <span id="startPanel" style="display:none; gap:8px; align-items:center;">
         <label style="font-size:13px; color:#555;">开始投资的次数</label>
@@ -422,6 +449,9 @@
       </span>
     </div>
   </div>
+
+  <!-- 历史回测结果 -->
+  <div class="card" id="backtestResult" style="display:none;"></div>
 </div>
 
 <!-- 参数说明弹窗 -->
@@ -447,9 +477,31 @@
   </div>
 </div>
 
+<div class="modal-overlay" id="backtestModal">
+  <div class="modal" style="max-width:520px;">
+    <button class="modal-close" onclick="closeBacktestModal()">×</button>
+    <h3>历史回测</h3>
+    <p style="margin:8px 0; color:#666; font-size:13px;">上传 CSV 历史净值数据（需包含 <code>FSRQ</code> 日期、<code>DWJZ</code> 单位净值、<code>LJJZ</code> 累计净值三列），将按当前计划的加仓档位验证历史表现。</p>
+    <p style="margin:0 0 12px; color:#868e96; font-size:12px;">分红自动检测（LJJZ − DWJZ 差值递增），按当日单位净值换算为份额、不消耗现金。</p>
+    <div class="upload-area" onclick="document.getElementById('csvFile').click()">
+      <div style="font-size:36px;">📁</div>
+      <div style="font-weight:600; margin-top:6px;">点击选择 CSV 文件</div>
+      <div style="margin-top:4px;">或拖拽文件到此处</div>
+      <input type="file" id="csvFile" accept=".csv,.txt">
+    </div>
+    <div class="upload-hint">示例：FSRQ,DWJZ,LJJZ<br>2021-11-19,6.375,6.875<br>2021-11-22,6.313,6.813</div>
+    <div id="btFileName" style="margin-top:10px; font-size:13px; color:#4361ee;"></div>
+    <div style="margin-top:14px; display:flex; gap:10px; justify-content:flex-end;">
+      <button class="btn" style="background:#999;" onclick="closeBacktestModal()">取消</button>
+      <button class="btn" id="btRunBtn" onclick="runBacktest()">开始回测</button>
+    </div>
+  </div>
+</div>
+
 <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
 <script>
 let chartInstance = null;
+let btChartInstance = null;
 let lastCalc = null; // 最近一次计算的完整参数与基准总投入，用于"扩大最大回撤"
 let lastRows = null; // 当前表格展示的数据行（含追加行），用于导出
 
@@ -979,7 +1031,7 @@ function renderChart(rows, targetRatio) {
   const chartDom = document.getElementById('chart');
   if (!chartInstance) {
     chartInstance = echarts.init(chartDom);
-    window.addEventListener('resize', () => chartInstance && chartInstance.resize());
+    window.addEventListener('resize', () => { if (chartInstance) chartInstance.resize(); if (btChartInstance) btChartInstance.resize(); });
   }
 
   const steps = rows.map(r => r.step);
@@ -1262,8 +1314,338 @@ document.getElementById('exportName').addEventListener('keydown', e => {
   if (e.key === 'Enter') confirmExport();
 });
 document.addEventListener('keydown', e => {
-  if (e.key === 'Escape') { closeHelp(); closeExportModal(); }
+  if (e.key === 'Escape') { closeHelp(); closeExportModal(); closeBacktestModal(); }
 });
+
+// ========== 历史回测 ==========
+let btCSVData = null;
+
+function toggleBacktest() {
+  document.getElementById('backtestModal').classList.add('show');
+}
+function closeBacktestModal() {
+  document.getElementById('backtestModal').classList.remove('show');
+}
+document.getElementById('csvFile').addEventListener('change', e => {
+  const f = e.target.files[0];
+  if (f) document.getElementById('btFileName').textContent = '已选择：' + f.name;
+});
+document.getElementById('backtestModal').addEventListener('click', e => {
+  if (e.target.id === 'backtestModal') closeBacktestModal();
+});
+
+// 拖拽支持
+document.addEventListener('DOMContentLoaded', () => {
+  const area = document.querySelector('.upload-area');
+  if (!area) return;
+  ['dragover', 'dragenter'].forEach(ev => area.addEventListener(ev, e => { e.preventDefault(); area.style.background = '#eef0ff'; }));
+  ['dragleave', 'drop'].forEach(ev => area.addEventListener(ev, e => { e.preventDefault(); area.style.background = ''; }));
+  area.addEventListener('drop', e => {
+    const f = e.dataTransfer.files[0];
+    if (f) {
+      document.getElementById('csvFile').files = e.dataTransfer.files;
+      document.getElementById('btFileName').textContent = '已选择：' + f.name;
+    }
+  });
+});
+
+// CSV 解析
+function parseCSV(text) {
+  const lines = text.replace(/\r/g, '').split('\n').filter(l => l.trim());
+  if (lines.length < 2) throw new Error('CSV 数据为空');
+  const header = lines[0].split(',').map(s => s.trim().toUpperCase());
+  const idx = {
+    date: header.indexOf('FSRQ'),
+    dwjz: header.indexOf('DWJZ'),
+    ljjz: header.indexOf('LJJZ'),
+  };
+  if (idx.date < 0 || idx.dwjz < 0) throw new Error('CSV 缺少 FSRQ 或 DWJZ 列');
+  const rows = [];
+  for (let i = 1; i < lines.length; i++) {
+    const cols = lines[i].split(',').map(s => s.trim());
+    const dwjz = parseFloat(cols[idx.dwjz]);
+    const ljjz = idx.ljjz >= 0 ? parseFloat(cols[idx.ljjz]) : NaN;
+    if (isNaN(dwjz) || dwjz <= 0) continue;
+    rows.push({ date: cols[idx.date], dwjz, ljjz: isNaN(ljjz) ? dwjz : ljjz });
+  }
+  return rows;
+}
+
+function runBacktest() {
+  const file = document.getElementById('csvFile').files[0];
+  if (!file) { alert('请先选择 CSV 文件'); return; }
+  closeBacktestModal();
+  const reader = new FileReader();
+  reader.onload = e => {
+    try {
+      const csv = parseCSV(e.target.result);
+      const planRows = lastRows.filter(r => r.step > 0); // 排除 step=0（档位0 单独按首日建仓处理）
+      const levels = planRows.map(r => ({ lossRatio: r.lossRatio, invest: r.invest, totalInvest: r.totalInvest }))
+                             .filter(l => l.invest > 0)
+                             .sort((a, b) => a.lossRatio - b.lossRatio);
+      const initialRow = lastRows.find(r => r.step === 0);
+      const initialInvest = initialRow ? initialRow.invest : 0;
+      const result = simulateBacktest(csv, levels, initialInvest);
+      renderBacktest(result);
+    } catch (err) {
+      alert('回测失败：' + err.message);
+    }
+  };
+  reader.readAsText(file, 'utf-8');
+}
+
+function simulateBacktest(csv, levels, initialInvest = 0) {
+  if (csv.length === 0) return { rows: [], summary: null };
+  const levelTriggered = new Array(levels.length).fill(false);
+  let rollingHigh = csv[0].dwjz;
+  let maxDrawdownSeen = 0; // 历史最大回撤（到昨日为止）
+  // 档位0：回测起始日按当日净值建仓（对应详细数据表的第 0 次）
+  let shares = initialInvest > 0 ? initialInvest / csv[0].dwjz : 0;
+  let totalInvest = initialInvest > 0 ? initialInvest : 0;
+  let dividendShares = 0; // 累计分红份额
+  let prevDiff = csv[0].ljjz - csv[0].dwjz; // 累计净值差（表示历史总分红）
+  const planMaxDD = levels.length > 0 ? levels[levels.length - 1].lossRatio : 0; // 计划最深档回撤
+  const out = [];
+
+  for (let i = 0; i < csv.length; i++) {
+    const day = csv[i];
+    // 更新高点
+    rollingHigh = Math.max(rollingHigh, day.dwjz);
+    // 当日回撤
+    const dd = (rollingHigh - day.dwjz) / rollingHigh;
+
+    // ① 分红检测（先算分红）
+    const diff = day.ljjz - day.dwjz;
+    let divPerShare = 0;
+    if (diff > prevDiff + 1e-9 && shares > 0) {
+      divPerShare = diff - prevDiff; // 每股分红金额
+      dividendShares += divPerShare * shares / day.dwjz;
+      shares += divPerShare * shares / day.dwjz;
+    }
+    prevDiff = diff;
+
+    // ② 判断创新低
+    const prevMaxDD = maxDrawdownSeen; // 上次为止的历史最大回撤
+    const isNewLow = dd > prevMaxDD + 1e-9 && dd > 0;
+
+    // ③ 匹配档位：买入"本次新低真正跨过"的所有档位（回撤严格介于上次最大回撤与当前回撤之间）
+    //    金额 = 计划表该档位的「总投入」− 回测当前「总投入」，即补齐到计划累计口径（含档位0 建仓）
+    let buyAmount = 0;
+    let buyLevel = -1;
+    const buyLevels = [];
+    let isInitialBuy = false;
+    if (i === 0 && initialInvest > 0) {
+      isInitialBuy = true;
+      buyAmount = initialInvest;
+    } else if (isNewLow && levels.length > 0) {
+      for (let k = 0; k < levels.length; k++) {
+        if (!levelTriggered[k] && dd >= levels[k].lossRatio - 1e-9 && levels[k].lossRatio > prevMaxDD + 1e-9) {
+          levelTriggered[k] = true;
+          buyLevels.push(k);
+        }
+      }
+      if (buyLevels.length > 0) {
+        buyLevel = buyLevels[buyLevels.length - 1];
+        buyAmount = Math.max(0, levels[buyLevel].totalInvest - totalInvest);
+      }
+    }
+    if (isNewLow) maxDrawdownSeen = dd;
+
+    // ③-b 创新低、已越过计划最深档、本应加仓却没有档位可用（计划已跑完）
+    const isMissed = isNewLow && buyAmount <= 0 && levels.length > 0 && dd > planMaxDD + 1e-9;
+
+    // ④ 执行买入（档位0 已在循环前建仓，此处不重复计入）
+    if (!isInitialBuy && buyAmount > 0) {
+      shares += buyAmount / day.dwjz;
+      totalInvest += buyAmount;
+    }
+
+    // ⑤ 写入行
+    const avgCost = shares > 0 ? totalInvest / shares : 0;
+    const pnlAmt = (day.dwjz - avgCost) * shares;
+    const pnlPct = avgCost > 0 ? (day.dwjz - avgCost) / avgCost : 0;
+    out.push({
+      date: day.date, dwjz: day.dwjz, dd,
+      isBuy: buyAmount > 0, buyAmount, buyLevel, buyLevels, isInitialBuy, isMissed,
+      isDividend: divPerShare > 0, divPerShare,
+      shares, totalInvest, avgCost, pnlAmt, pnlPct,
+    });
+  }
+
+  // 汇总
+  const finalRow = out[out.length - 1];
+  let maxHistoricalDD = 0;
+  let maxHistoricalDDDate = out[0].date; // 历史最大回撤发生的日期（首次达到该回撤的那天）
+  let maxHistoricalDDNav = out[0].dwjz;
+  let maxDDPnlPct = out[0].pnlPct;
+  let maxDDPnlAmt = out[0].pnlAmt;
+  for (const r of out) {
+    if (r.dd > maxHistoricalDD) {
+      maxHistoricalDD = r.dd; maxHistoricalDDDate = r.date; maxHistoricalDDNav = r.dwjz;
+      maxDDPnlPct = r.pnlPct; maxDDPnlAmt = r.pnlAmt;
+    }
+  }
+  const triggered = levelTriggered.filter(x => x).length;
+  // 计划总投入取计划表最后一行的「总投入」（含档位0 建仓，与回测口径一致）
+  const planTotalInvest = lastRows[lastRows.length - 1].totalInvest;
+  const finalValue = finalRow.shares * finalRow.dwjz;
+  const summary = {
+    startDate: out[0].date, endDate: finalRow.date,
+    dataDays: out.length,
+    triggeredLevels: `${triggered} / ${levels.length}`,
+    planTotalInvest, actualInvest: finalRow.totalInvest,
+    finalShares: finalRow.shares,
+    finalDWJZ: finalRow.dwjz,
+    finalValue,
+    totalPnlAmt: finalValue - finalRow.totalInvest,
+    totalPnlPct: finalRow.totalInvest > 0 ? (finalValue - finalRow.totalInvest) / finalRow.totalInvest : 0,
+    maxHistoricalDD,
+    maxHistoricalDDDate,
+    maxHistoricalDDNav,
+    maxDDPnlPct,
+    maxDDPnlAmt,
+    planMaxDD: levels.length > 0 ? levels[levels.length - 1].lossRatio : 0,
+    dividendShares,
+  };
+  return { rows: out, summary };
+}
+
+function fmtMoney(n, d = 2) {
+  if (!isFinite(n)) return '-';
+  const s = n.toFixed(d);
+  return (s.startsWith('-') ? '-' : '') + Math.abs(parseFloat(s)).toLocaleString('zh-CN', { minimumFractionDigits: d, maximumFractionDigits: d });
+}
+function fmtPct2(n) { return (n * 100).toFixed(2) + '%'; }
+
+function renderBacktest(result) {
+  const host = document.getElementById('backtestResult');
+  host.style.display = 'block';
+  const s = result.summary;
+  const summaryCards = `
+    <div class="bt-card"><div class="label">回测区间</div><div class="value" style="font-size:14px;">${s.startDate} ~ ${s.endDate}</div></div>
+    <div class="bt-card"><div class="label">交易日数</div><div class="value">${s.dataDays}</div></div>
+    <div class="bt-card"><div class="label">触发加仓档位</div><div class="value">${s.triggeredLevels}</div></div>
+    <div class="bt-card"><div class="label">实际总投入</div><div class="value">${fmtMoney(s.actualInvest)}</div></div>
+    <div class="bt-card"><div class="label">计划总投入</div><div class="value" style="font-size:14px;">${fmtMoney(s.planTotalInvest)}</div></div>
+    <div class="bt-card"><div class="label">最终持仓数量</div><div class="value">${fmtMoney(s.finalShares, 4)}</div></div>
+    <div class="bt-card"><div class="label">分红累计份额</div><div class="value">${fmtMoney(s.dividendShares, 4)}</div></div>
+    <div class="bt-card"><div class="label">历史最大回撤</div><div class="value" style="color:#e63946;">${fmtPct2(s.maxHistoricalDD)}</div><div style="font-size:11px; color:#868e96;">${s.maxHistoricalDDDate} · 净值 ${s.maxHistoricalDDNav.toFixed(4)}</div></div>
+    <div class="bt-card"><div class="label">最大回撤持仓盈亏</div><div class="value ${s.maxDDPnlPct >= 0 ? 'positive' : 'negative'}">${fmtPct2(s.maxDDPnlPct)}</div><div style="font-size:11px; color:#868e96;">盈亏金额 ${fmtMoney(s.maxDDPnlAmt)}</div></div>
+    <div class="bt-card"><div class="label">最终持仓市值</div><div class="value">${fmtMoney(s.finalValue)}</div></div>
+    <div class="bt-card"><div class="label">总盈亏金额</div><div class="value ${s.totalPnlAmt >= 0 ? 'positive' : 'negative'}">${fmtMoney(s.totalPnlAmt)}</div></div>
+    <div class="bt-card"><div class="label">总盈亏比例</div><div class="value ${s.totalPnlPct >= 0 ? 'positive' : 'negative'}">${fmtPct2(s.totalPnlPct)}</div></div>
+  `;
+
+  let table = `<table class="bt-table"><thead><tr>
+    <th>日期</th><th>单位净值</th><th>当日回撤</th><th>买入</th><th>买入金额</th><th>买数量</th><th>分红</th><th>总数量</th><th>总投入</th><th>平均成本</th><th>盈亏比例</th><th>盈亏金额</th>
+  </tr></thead><tbody>`;
+  for (const r of result.rows) {
+    const cls = [r.isBuy ? 'bt-row-buy' : '', r.isDividend ? 'bt-row-dividend' : '', r.isMissed ? 'bt-row-missed' : ''].filter(Boolean).join(' ');
+    const lv = (r.buyLevels && r.buyLevels.length) ? r.buyLevels : (r.isBuy ? [r.buyLevel] : []);
+    const buyText = r.isInitialBuy
+      ? '✓ 初始建仓'
+      : (r.isBuy
+        ? (lv.length === 1 ? `✓ 档位${lv[0] + 1}` : `✓ 档位${lv[0] + 1}~${lv[lv.length - 1] + 1}（${lv.length}档）`)
+        : (r.isMissed ? '✗ 未加仓（超计划回撤）' : ''));
+    const divText = r.isDividend ? `每股${r.divPerShare.toFixed(4)}` : '';
+    table += `<tr class="${cls}">
+      <td>${r.date}</td>
+      <td>${r.dwjz.toFixed(4)}</td>
+      <td>${r.dd > 0 ? fmtPct2(r.dd) : '-'}</td>
+      <td>${buyText}</td>
+      <td>${r.buyAmount > 0 ? fmtMoney(r.buyAmount) : '-'}</td>
+      <td>${r.buyAmount > 0 ? (r.buyAmount / r.dwjz).toFixed(4) : '-'}</td>
+      <td>${divText}</td>
+      <td>${r.shares.toFixed(4)}</td>
+      <td>${fmtMoney(r.totalInvest)}</td>
+      <td>${r.avgCost > 0 ? r.avgCost.toFixed(4) : '-'}</td>
+      <td class="${r.pnlPct >= 0 ? 'positive' : 'negative'}">${r.totalInvest > 0 ? fmtPct2(r.pnlPct) : '-'}</td>
+      <td class="${r.pnlAmt >= 0 ? 'positive' : 'negative'}">${r.totalInvest > 0 ? fmtMoney(r.pnlAmt) : '-'}</td>
+    </tr>`;
+  }
+  table += '</tbody></table>';
+
+  // 历史回撤超过计划回撤时给出提示（建议值按当前网格向上取整到最近档位，保证一次追加即可覆盖）
+  let ddGapWarn = '';
+  if (s.planMaxDD > 0 && s.maxHistoricalDD > s.planMaxDD + 1e-9) {
+    let suggestDD = s.maxHistoricalDD;
+    if (lastCalc && lastCalc.grid > 0) {
+      const g = lastCalc.grid;
+      const step = lastCalc.mode === 'linear'
+        ? Math.max(1, Math.ceil(s.maxHistoricalDD / g - 1e-9))
+        : Math.max(1, Math.ceil(Math.log(1 - s.maxHistoricalDD) / Math.log(1 - g) - 1e-9));
+      suggestDD = lastCalc.mode === 'linear' ? step * g : 1 - Math.pow(1 - g, step);
+    }
+    ddGapWarn = `
+      <div class="bt-warn">
+        ⚠️ <b>历史最大回撤 ${fmtPct2(s.maxHistoricalDD)} 已超过计划的最大回撤 ${fmtPct2(s.planMaxDD)}</b>，
+        超出该深度的下跌不会再触发补仓（账户进入死扛），实际投入停留在 ${fmtMoney(s.actualInvest)} / 计划 ${fmtMoney(s.planTotalInvest)}。<br>
+        如需覆盖整段行情，请先点击「📈 扩大最大回撤比例」，填入 <b>${(suggestDD * 100).toFixed(2)}%</b> 后点「追加计算」，再重新执行回测。
+      </div>`;
+  }
+
+  host.innerHTML = `
+    <div class="section-title">📊 历史回测结果</div>
+    <p style="color:#868e96; font-size:12px; margin:-6px 0 14px;">红色底 = 买入日（含档位0 初始建仓）；黄色底 = 分红日；橙底 = 既是买入日又是分红日；灰蓝底 = 创新低且已超出计划最大回撤，本应加仓但未加仓</p>
+    ${ddGapWarn}
+    <div class="bt-summary">${summaryCards}</div>
+    <div id="backtestChart" style="width:100%; height:360px; margin:4px 0 16px;"></div>
+    <div style="max-height:600px; overflow:auto; border:1px solid #e9ecef; border-radius:8px;">${table}</div>
+  `;
+  renderBacktestChart(result.rows);
+  host.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function renderBacktestChart(rows) {
+  const chartDom = document.getElementById('backtestChart');
+  if (!chartDom || typeof echarts === 'undefined') return;
+  if (btChartInstance) { btChartInstance.dispose(); btChartInstance = null; }
+  btChartInstance = echarts.init(chartDom);
+
+  const dates = rows.map(r => r.date);
+  const navs = rows.map(r => +r.dwjz.toFixed(4));
+  const avgCosts = rows.map(r => r.avgCost > 0 ? +r.avgCost.toFixed(4) : null);
+  // 当日回撤以负值展示，落在 0 轴下方（口径仍为距历史最高点的回撤）
+  const dds = rows.map(r => r.dd > 0 ? -+(r.dd * 100).toFixed(2) : 0);
+  const pnls = rows.map(r => r.totalInvest > 0 ? +(r.pnlPct * 100).toFixed(2) : null);
+  // 加仓时点（不含首日建仓）：在单位净值曲线上用红点标出
+  const buyPoints = rows.map(r => (r.isBuy && !r.isInitialBuy) ? +r.dwjz.toFixed(4) : null);
+
+  const option = {
+    tooltip: {
+      trigger: 'axis',
+      axisPointer: { type: 'cross' },
+      valueFormatter: v => (v === null || v === undefined ? '-' : v),
+    },
+    legend: { data: ['单位净值', '平均成本', '盈亏比例', '当日回撤'], top: 0 },
+    grid: { left: 60, right: 70, top: 50, bottom: 50 },
+    xAxis: {
+      type: 'category', data: dates,
+      axisLabel: {
+        // 横轴只显示到"年-月"：只在月份切换处打标签，重叠时自动隐藏
+        formatter: v => v.slice(0, 7),
+        interval: (i, v) => i === 0 || v.slice(0, 7) !== dates[i - 1].slice(0, 7),
+        hideOverlap: true, fontSize: 11,
+      },
+    },
+    yAxis: [
+      { type: 'value', name: '净值', position: 'left', scale: true, axisLabel: { formatter: v => v.toFixed(2) } },
+      { type: 'value', name: '比率(%)', position: 'right', axisLabel: { formatter: '{value}%' } },
+    ],
+    series: [
+      { name: '单位净值', type: 'line', data: navs, showSymbol: false, yAxisIndex: 0, lineStyle: { width: 2, color: '#4361ee' }, itemStyle: { color: '#4361ee' } },
+      { name: '平均成本', type: 'line', data: avgCosts, showSymbol: false, yAxisIndex: 0, lineStyle: { width: 2, color: '#27ae60' }, itemStyle: { color: '#27ae60' } },
+      {
+        name: '盈亏比例', type: 'line', data: pnls, showSymbol: false, yAxisIndex: 1,
+        lineStyle: { width: 2, type: 'dashed', color: '#ff9f1c' }, itemStyle: { color: '#ff9f1c' },
+        markLine: { silent: true, symbol: 'none', data: [{ yAxis: 0 }], lineStyle: { color: '#adb5bd', type: 'dashed' }, label: { show: false } },
+      },
+      { name: '当日回撤', type: 'line', data: dds, showSymbol: false, yAxisIndex: 1, lineStyle: { width: 1.5, type: 'dashed', color: '#ff6b9d' }, itemStyle: { color: '#ff6b9d' } },
+      { name: '加仓点', type: 'scatter', data: buyPoints, symbolSize: 7, itemStyle: { color: '#e63946' }, z: 6, tooltip: { show: false } },
+    ],
+  };
+  btChartInstance.setOption(option, true);
+}
 
 // 初始化
 updateInputModeVisibility();
