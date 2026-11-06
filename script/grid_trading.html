@@ -374,7 +374,7 @@
       </div>
       <div class="control-group" id="targetGroup">
         <label>目标亏损系数 (%)<span class="help-icon" data-help="target">?</span></label>
-        <input type="number" id="targetPct" value="50" step="5" min="10" max="90">
+        <input type="number" id="targetPct" value="50" step="5" min="0.01" max="99.99">
       </div>
       <div class="control-group" id="initialGroup">
         <label>初始投入金额<span class="help-icon" data-help="initial">?</span></label>
@@ -640,7 +640,7 @@ function refreshViews() {
   const rows = c.startStep != null ? applyStartStep(lastRows, c.startStep, c.grid) : lastRows;
   lastDisplayRows = rows;
   renderTable(rows, c.targetRatio, 2, c.initialNav, c.plannedTotal, c.extendedDd != null ? c.maxStep : null, c.startStep);
-  renderSummary(rows, c.initialNav);
+  renderSummary(rows, c.initialNav, c.grid);
   renderChart(rows, c.targetRatio);
   updateExtendHint(rows[rows.length - 1].totalInvest);
 }
@@ -799,11 +799,11 @@ function doExportHTML(name) {
   }
 
   const headers = ['次数', '净值', '回撤比例', '回撤修复涨幅', '增加资金', '上次总价值', '当前价值', '总投入', '资金使用率', '总亏损价值', '总亏损比率', '盈亏平衡涨幅', '回撤修复收益率'];
-  const bodyRows = rows.map(r => {
+  // 过滤掉"开始投资次数"之前的置灰行
+  const exportRows = rows.filter(r => !(c.startStep != null && r.step < c.startStep));
+  const bodyRows = exportRows.map(r => {
     const ext = c.extendedDd != null && r.step > c.maxStep;
-    const skip = c.startStep != null && r.step < c.startStep;
-    const cls = [ext ? 'ext' : '', skip ? 'skip' : ''].filter(Boolean).join(' ');
-    return `<tr${cls ? ` class="${cls}"` : ''}>
+    return `<tr${ext ? ` class="ext"` : ''}>
       <td>${r.step}</td>
       <td>${(c.initialNav * r.nav).toFixed(4)}</td>
       <td>${fmtP(r.lossRatio)}</td>
@@ -850,7 +850,7 @@ function doExportHTML(name) {
   })()}</table>
 <h2>详细数据表</h2>
 <table class="data"><thead><tr>${headers.map(h => `<th>${h}</th>`).join('')}</tr></thead><tbody>${bodyRows}</tbody></table>
-<p class="note">补仓公式：增加资金 = (上次总投入 − 上次总价值) ÷ (当前回撤比例 × 目标系数) − 上次总投入${c.startStep != null ? `；灰色行为"开始投资次数"之前的行（第 ${c.startStep} 次才首次投入，该行增加资金 = 原计划累计总投入）` : ''}${c.extendedDd != null ? '；浅蓝背景行为"扩大最大回撤"后追加的行，其资金使用率以原计划总投入为分母（可超过 100%）' : ''}。生成时间：${new Date().toLocaleString('zh-CN')}</p>
+<p class="note">补仓公式：增加资金 = (上次总投入 − 上次总价值) ÷ (当前回撤比例 × 目标系数) − 上次总投入${c.startStep != null ? `；已过滤"开始投资次数"之前的未投入行（第 ${c.startStep} 次才首次投入）` : ''}${c.extendedDd != null ? '；浅蓝背景行为"扩大最大回撤"后追加的行，其资金使用率以原计划总投入为分母（可超过 100%）' : ''}。生成时间：${new Date().toLocaleString('zh-CN')}</p>
 </body></html>`;
 
   const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
@@ -996,34 +996,50 @@ function renderTable(rows, targetRatio, decimals = 2, initialNav = 1, plannedTot
   }).join('');
 }
 
-function renderSummary(rows, initialNav = 1) {
+function renderSummary(rows, initialNav = 1, gridRatio = 0) {
   const last = rows[rows.length - 1];
-  const finalNav = last.nav * initialNav;
+  // 首末档投入比 = 第 0 档 invest / 最后一个 invest > 0 的档位 invest
+  const investedRows = rows.filter(r => r.invest > 0);
+  const lastInvestRow = investedRows[investedRows.length - 1] || last;
+  const lastInvest = lastInvestRow.invest;
+  const ratioLast = lastInvest > 0 ? (rows[0].invest / lastInvest * 100) : 0;
+  // 增加资金最小值 / 最大值 之比
+  const investValues = investedRows.map(r => r.invest);
+  const minInvest = Math.min(...investValues);
+  const maxInvest = Math.max(...investValues);
+  const ratioMinMax = maxInvest > 0 ? (minInvest / maxInvest * 100) : 0;
+  // 倒数第二次 → 倒数第一次 之间的净值下跌百分比
+  let lastStepDD = null;
+  if (investedRows.length >= 2) {
+    const prev = investedRows[investedRows.length - 2];
+    const cur = investedRows[investedRows.length - 1];
+    if (prev.nav > 0) lastStepDD = (prev.nav - cur.nav) / prev.nav * 100;
+  }
   document.getElementById('summary').innerHTML = `
     <div class="summary-item">
-      <div class="label">最终净值</div>
-      <div class="value ${finalNav >= initialNav ? 'positive' : 'negative'}">${finalNav.toFixed(4)}</div>
-    </div>
-    <div class="summary-item">
-      <div class="label">累计亏损比例</div>
-      <div class="value negative">${fmtPct(last.lossRatio)}</div>
-    </div>
-    <div class="summary-item">
-      <div class="label">总投入</div>
-      <div class="value">${fmtMoney(last.totalInvest)}</div>
-    </div>
-    <div class="summary-item">
-      <div class="label">当前价值</div>
+      <div class="label">账户资产</div>
       <div class="value ${last.curVal >= last.totalInvest ? 'positive' : ''}">${fmtMoney(last.curVal)}</div>
-    </div>
-    <div class="summary-item">
-      <div class="label">总亏损价值</div>
-      <div class="value negative">${fmtMoney(last.lossVal)}</div>
+      <div style="font-size:11px; color:#868e96; margin-top:2px;">总投入 ${fmtMoney(last.totalInvest)} / 总亏损 ${fmtMoney(last.lossVal)}</div>
     </div>
     <div class="summary-item">
       <div class="label">总亏损比率</div>
       <div class="value negative">${fmtPct(last.lossRate)}</div>
     </div>
+    <div class="summary-item">
+      <div class="label">首末档投入比</div>
+      <div class="value ${ratioLast >= 100 ? 'positive' : 'negative'}">${ratioLast.toFixed(2)}%</div>
+      <div style="font-size:11px; color:#868e96; margin-top:2px;">首档 ${fmtMoney(rows[0].invest)} / 末档 ${fmtMoney(lastInvest)}</div>
+    </div>
+    <div class="summary-item">
+      <div class="label">最小/最大投入比</div>
+      <div class="value ${ratioMinMax >= 50 ? 'positive' : 'negative'}">${ratioMinMax.toFixed(2)}%</div>
+      <div style="font-size:11px; color:#868e96; margin-top:2px;">最小 ${fmtMoney(minInvest)} / 最大 ${fmtMoney(maxInvest)}</div>
+    </div>
+    ${(gridRatio > 0 || lastStepDD != null) ? `<div class="summary-item">
+      <div class="label">网格大小 / 末两档下跌</div>
+      <div class="value">${(gridRatio * 100).toFixed(2)}%</div>
+      ${lastStepDD != null ? `<div style="font-size:11px; color:#868e96; margin-top:2px;">${lastStepDD.toFixed(2)}%（第 ${investedRows[investedRows.length-2].step} → 第 ${investedRows[investedRows.length-1].step}）</div>` : ''}
+    </div>` : ''}
   `;
 }
 
@@ -1037,28 +1053,60 @@ function renderChart(rows, targetRatio) {
   const steps = rows.map(r => r.step);
   const totalInvests = rows.map(r => +r.totalInvest.toFixed(2));
   const curVals = rows.map(r => +r.curVal.toFixed(2));
+  const lossVals = rows.map(r => +r.lossVal.toFixed(2));
   const lossRates = rows.map(r => +(r.lossRate * 100).toFixed(2));
   const lossRatios = rows.map(r => +(r.lossRatio * 100).toFixed(2));
+  const finalTotal = rows.length > 0 ? rows[rows.length - 1].totalInvest : 0;
+  const budgetUsed = finalTotal > 0 ? rows.map(r => +(r.totalInvest / finalTotal * 100).toFixed(2)) : rows.map(() => 0);
+  // 回撤修复收益率 = (修复后市值 − 总投入) ÷ 总投入，修复后市值 = 当前价值 ÷ 当前净值（净值归一回 1 后的持仓市值）
+  const recoverRates = rows.map(r => (r.totalInvest > 0 && r.nav > 0) ? +((r.curVal / r.nav - r.totalInvest) / r.totalInvest * 100).toFixed(2) : 0);
+  // 回撤修复收益率 / 总亏损比率（两者都已是百分比，相除后再转成百分比形式），lossRate=0 时置空
+  const recoverLossRatio = rows.map((r, i) => (r.lossRate > 0 && r.totalInvest > 0)
+    ? +((recoverRates[i] / lossRates[i]) * 100).toFixed(2)
+    : null);
 
   const option = {
-    tooltip: { trigger: 'axis', axisPointer: { type: 'cross' } },
-    legend: { data: ['总投入', '当前价值', '回撤比例', '总亏损比率'], top: 0 },
-    grid: { left: 60, right: 70, top: 50, bottom: 30 },
-    xAxis: { type: 'category', name: '下跌次数', data: steps },
-    yAxis: [
-      { type: 'value', name: '金额', position: 'left' },
-      { type: 'value', name: '比率(%)', position: 'right', min: 0, max: 100 }
-    ],
+    tooltip: {
+      trigger: 'axis', axisPointer: { type: 'cross' },
+      extraCssText: 'font-family: "SF Mono", Menlo, Consolas, "Courier New", monospace; font-size: 12px;',
+      formatter: function(params) {
+        const idx = params[0].dataIndex;
+        let html = `<div style="font-weight:bold; margin-bottom:4px;">第 ${params[0].axisValue} 次</div>`;
+        // 先展示金额型（不画线），统一 2 位小数
+        html += `<div style="display:flex; justify-content:space-between; gap:18px;"><span>🟧 总投入</span><span>${totalInvests[idx].toFixed(2)}</span></div>`;
+        html += `<div style="display:flex; justify-content:space-between; gap:18px;"><span>🟦 当前价值</span><span>${curVals[idx].toFixed(2)}</span></div>`;
+        html += `<div style="display:flex; justify-content:space-between; gap:18px;"><span>🟥 总亏损价值</span><span>${lossVals[idx].toFixed(2)}</span></div>`;
+        for (const p of params) {
+          if (p.value == null) continue; // 跳过 null 数据（如 step 0 的修复/亏损比）
+          html += `<div style="display:flex; justify-content:space-between; gap:18px;"><span>${p.marker}${p.seriesName}</span><span>${p.value.toFixed(2)}%</span></div>`;
+        }
+        return html;
+      }
+    },
+    legend: { data: ['资金使用率', '回撤比例', '总亏损比率', '回撤修复收益率', '修复/亏损比'], top: 0, selected: { '修复/亏损比': false } },
+    grid: { left: 50, right: 60, top: 50, bottom: 30 },
+    xAxis: { type: 'category', name: '下跌次数', data: steps, onZero: true },
+    yAxis: { type: 'value', name: '比率(%)', min: (v) => Math.min(0, Math.floor(v.min)), max: (v) => Math.max(100, Math.ceil(v.max)) },
     series: [
-      { name: '总投入', type: 'line', data: totalInvests, smooth: true, itemStyle: { color: '#ff9f1c' }, lineStyle: { width: 2 } },
-      { name: '当前价值', type: 'line', data: curVals, smooth: true, itemStyle: { color: '#2ec4b6' }, lineStyle: { width: 2 } },
       {
-        name: '回撤比例', type: 'line', yAxisIndex: 1, data: lossRatios, smooth: true,
-        itemStyle: { color: '#e63946' }, lineStyle: { width: 2, type: 'dashed' }
+        name: '资金使用率', type: 'line', data: budgetUsed, showSymbol: false, smooth: true, symbol: 'none', connectNulls: true,
+        itemStyle: { color: '#ff9f1c' }, lineStyle: { width: 2, type: 'solid' }
       },
       {
-        name: '总亏损比率', type: 'line', yAxisIndex: 1, data: lossRates, smooth: true,
-        itemStyle: { color: '#ff6b9d' }, lineStyle: { width: 2, type: 'dashed' }
+        name: '回撤比例', type: 'line', data: lossRatios, showSymbol: false, smooth: true, symbol: 'none', connectNulls: true,
+        itemStyle: { color: '#e63946' }, lineStyle: { width: 2, type: 'solid' }
+      },
+      {
+        name: '总亏损比率', type: 'line', data: lossRates, showSymbol: false, smooth: true, symbol: 'none', connectNulls: true,
+        itemStyle: { color: '#ff6b9d' }, lineStyle: { width: 2, type: 'solid' }
+      },
+      {
+        name: '回撤修复收益率', type: 'line', data: recoverRates, showSymbol: false, smooth: true, symbol: 'none', connectNulls: true,
+        itemStyle: { color: '#2ec4b6' }, lineStyle: { width: 2, type: 'solid' }
+      },
+      {
+        name: '修复/亏损比', type: 'line', data: recoverLossRatio, showSymbol: false, smooth: true, symbol: 'none', connectNulls: true,
+        itemStyle: { color: '#9b5de5' }, lineStyle: { width: 2, type: 'solid' }
       }
     ]
   };
