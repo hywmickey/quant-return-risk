@@ -1398,19 +1398,29 @@ document.getElementById('backtestModal').addEventListener('click', e => {
 });
 
 // 拖拽支持
-// 预设方案：都是按总投资反推网格与金额、线性下跌
+// 预设方案：均为按总投资反推网格与金额，分线性下跌与复利下跌两组
 const PRESETS = [
-  { name: '线性 / 按总投资 / 回撤5% / 100次 / 系数47.69%', mode: 'linear', inputMode: 'byBudget', initialNav: 1.0, maxDrawdown: 5, targetPct: 47.69, totalBudget: 10000, investCount: 100 },
-  { name: '线性 / 按总投资 / 回撤10% / 100次 / 系数45.66%', mode: 'linear', inputMode: 'byBudget', initialNav: 1.0, maxDrawdown: 10, targetPct: 45.66, totalBudget: 10000, investCount: 100 },
-  { name: '线性 / 按总投资 / 回撤15% / 100次 / 系数43.86%', mode: 'linear', inputMode: 'byBudget', initialNav: 1.0, maxDrawdown: 15, targetPct: 43.86, totalBudget: 10000, investCount: 100 },
-  { name: '线性 / 按总投资 / 回撤20% / 100次 / 系数42.24%', mode: 'linear', inputMode: 'byBudget', initialNav: 1.0, maxDrawdown: 20, targetPct: 42.24, totalBudget: 10000, investCount: 100 },
-  { name: '线性 / 按总投资 / 回撤30% / 100次 / 系数39.43%', mode: 'linear', inputMode: 'byBudget', initialNav: 1.0, maxDrawdown: 30, targetPct: 39.43, totalBudget: 10000, investCount: 100 },
-  { name: '线性 / 按总投资 / 回撤40% / 100次 / 系数37.05%', mode: 'linear', inputMode: 'byBudget', initialNav: 1.0, maxDrawdown: 40, targetPct: 37.05, totalBudget: 10000, investCount: 100 },
-  { name: '线性 / 按总投资 / 回撤50% / 100次 / 系数35.00%', mode: 'linear', inputMode: 'byBudget', initialNav: 1.0, maxDrawdown: 50, targetPct: 35.00, totalBudget: 10000, investCount: 100 },
-  { name: '线性 / 按总投资 / 回撤50% / 200次 / 系数34.94%', mode: 'linear', inputMode: 'byBudget', initialNav: 1.0, maxDrawdown: 50, targetPct: 34.94, totalBudget: 10000, investCount: 200 },
-  { name: '线性 / 按总投资 / 回撤60% / 200次 / 系数33.14%', mode: 'linear', inputMode: 'byBudget', initialNav: 1.0, maxDrawdown: 60, targetPct: 33.14, totalBudget: 10000, investCount: 200 },
-  { name: '线性 / 按总投资 / 回撤75% / 400次 / 系数30.80%', mode: 'linear', inputMode: 'byBudget', initialNav: 1.0, maxDrawdown: 75, targetPct: 30.80, totalBudget: 10000, investCount: 400 },
-  { name: '线性 / 按总投资 / 回撤90% / 500次 / 系数28.82%', mode: 'linear', inputMode: 'byBudget', initialNav: 1.0, maxDrawdown: 90, targetPct: 28.82, totalBudget: 10000, investCount: 500 },
+  { name: '线性 / 按总投资 / 回撤5% / 100次 / 系数47.6931%', mode: 'linear', inputMode: 'byBudget', initialNav: 1.0, maxDrawdown: 5, targetPct: 47.6931, totalBudget: 10000, investCount: 100 },
+  { name: '线性 / 按总投资 / 回撤10% / 100次 / 系数45.6690%', mode: 'linear', inputMode: 'byBudget', initialNav: 1.0, maxDrawdown: 10, targetPct: 45.6690, totalBudget: 10000, investCount: 100 },
+  { name: '线性 / 按总投资 / 回撤15% / 100次 / 系数43.8676%', mode: 'linear', inputMode: 'byBudget', initialNav: 1.0, maxDrawdown: 15, targetPct: 43.8676, totalBudget: 10000, investCount: 100 },
+  { name: '线性 / 按总投资 / 回撤20% / 100次 / 系数42.2469%', mode: 'linear', inputMode: 'byBudget', initialNav: 1.0, maxDrawdown: 20, targetPct: 42.2469, totalBudget: 10000, investCount: 100 },
+  { name: '线性 / 按总投资 / 回撤30% / 100次 / 系数39.4313%', mode: 'linear', inputMode: 'byBudget', initialNav: 1.0, maxDrawdown: 30, targetPct: 39.4313, totalBudget: 10000, investCount: 100 },
+  { name: '线性 / 按总投资 / 回撤40% / 100次 / 系数37.0519%', mode: 'linear', inputMode: 'byBudget', initialNav: 1.0, maxDrawdown: 40, targetPct: 37.0519, totalBudget: 10000, investCount: 100 },
+  { name: '线性 / 按总投资 / 回撤50% / 100次 / 系数35.0018%', mode: 'linear', inputMode: 'byBudget', initialNav: 1.0, maxDrawdown: 50, targetPct: 35.0018, totalBudget: 10000, investCount: 100 },
+  { name: '线性 / 按总投资 / 回撤50% / 200次 / 系数34.9463%', mode: 'linear', inputMode: 'byBudget', initialNav: 1.0, maxDrawdown: 50, targetPct: 34.9463, totalBudget: 10000, investCount: 200 },
+  { name: '线性 / 按总投资 / 回撤60% / 200次 / 系数33.1497%', mode: 'linear', inputMode: 'byBudget', initialNav: 1.0, maxDrawdown: 60, targetPct: 33.1497, totalBudget: 10000, investCount: 200 },
+  { name: '线性 / 按总投资 / 回撤75% / 400次 / 系数30.8004%', mode: 'linear', inputMode: 'byBudget', initialNav: 1.0, maxDrawdown: 75, targetPct: 30.8004, totalBudget: 10000, investCount: 400 },
+  { name: '线性 / 按总投资 / 回撤90% / 500次 / 系数28.8246%', mode: 'linear', inputMode: 'byBudget', initialNav: 1.0, maxDrawdown: 90, targetPct: 28.8246, totalBudget: 10000, investCount: 500 },
+  { name: '复利 / 按总投资 / 回撤5% / 100次 / 系数50.2343%', mode: 'compound', inputMode: 'byBudget', initialNav: 1.0, maxDrawdown: 5, targetPct: 50.2343, totalBudget: 10000, investCount: 100 },
+  { name: '复利 / 按总投资 / 回撤10% / 100次 / 系数50.4807%', mode: 'compound', inputMode: 'byBudget', initialNav: 1.0, maxDrawdown: 10, targetPct: 50.4807, totalBudget: 10000, investCount: 100 },
+  { name: '复利 / 按总投资 / 回撤20% / 100次 / 系数51.0146%', mode: 'compound', inputMode: 'byBudget', initialNav: 1.0, maxDrawdown: 20, targetPct: 51.0146, totalBudget: 10000, investCount: 100 },
+  { name: '复利 / 按总投资 / 回撤30% / 100次 / 系数51.6152%', mode: 'compound', inputMode: 'byBudget', initialNav: 1.0, maxDrawdown: 30, targetPct: 51.6152, totalBudget: 10000, investCount: 100 },
+  { name: '复利 / 按总投资 / 回撤40% / 100次 / 系数52.3016%', mode: 'compound', inputMode: 'byBudget', initialNav: 1.0, maxDrawdown: 40, targetPct: 52.3016, totalBudget: 10000, investCount: 100 },
+  { name: '复利 / 按总投资 / 回撤50% / 100次 / 系数53.1032%', mode: 'compound', inputMode: 'byBudget', initialNav: 1.0, maxDrawdown: 50, targetPct: 53.1032, totalBudget: 10000, investCount: 100 },
+  { name: '复利 / 按总投资 / 回撤60% / 100次 / 系数54.068%', mode: 'compound', inputMode: 'byBudget', initialNav: 1.0, maxDrawdown: 60, targetPct: 54.068, totalBudget: 10000, investCount: 100 },
+  { name: '复利 / 按总投资 / 回撤70% / 200次 / 系数54.8019%', mode: 'compound', inputMode: 'byBudget', initialNav: 1.0, maxDrawdown: 70, targetPct: 54.8019, totalBudget: 10000, investCount: 200 },
+  { name: '复利 / 按总投资 / 回撤75% / 200次 / 系数55.492%', mode: 'compound', inputMode: 'byBudget', initialNav: 1.0, maxDrawdown: 75, targetPct: 55.492, totalBudget: 10000, investCount: 200 },
+  { name: '复利 / 按总投资 / 回撤90% / 300次 / 系数58.3397%', mode: 'compound', inputMode: 'byBudget', initialNav: 1.0, maxDrawdown: 90, targetPct: 58.3397, totalBudget: 10000, investCount: 300 },
 ];
 
 function applyPreset(idx) {
