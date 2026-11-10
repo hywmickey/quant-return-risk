@@ -345,6 +345,12 @@
   <!-- 参数控制 -->
   <div class="card">
     <div class="section-title">参数设置</div>
+    <div style="margin-bottom:12px; display:flex; align-items:center; gap:10px;">
+      <label for="presetSelect" style="font-size:13px; color:#555; margin:0;">快速方案：</label>
+      <select id="presetSelect" style="padding:4px 8px; border-radius:4px; border:1px solid #ced4da; font-size:13px;">
+        <option value="">— 自定义参数 —</option>
+      </select>
+    </div>
     <div class="controls">
       <div class="control-group">
         <label>下跌模型<span class="help-icon" data-help="mode">?</span></label>
@@ -1065,7 +1071,8 @@ function renderChart(rows, targetRatio) {
   const lossRatios = rows.map(r => +(r.lossRatio * 100).toFixed(2));
   const finalTotal = rows.length > 0 ? rows[rows.length - 1].totalInvest : 0;
   const budgetUsed = finalTotal > 0 ? rows.map(r => +(r.totalInvest / finalTotal * 100).toFixed(2)) : rows.map(() => 0);
-  // 回撤修复收益率 = (修复后市值 − 总投入) ÷ 总投入，修复后市值 = 当前价值 ÷ 当前净值（净值归一回 1 后的持仓市值）
+  // 回撤修复收益率 = (修复后市值 − 总投入) ÷ 总投入
+  // 修复后市值 = 当前价值 ÷ 相对净值（r.nav ≡ 1 − 回撤比例，即净值涨回初始净值时的市值；此处直接用递推的 r.nav，避免回撤接近 100% 时 1 − 回撤比例 的相减抵消）
   const recoverRates = rows.map(r => (r.totalInvest > 0 && r.nav > 0) ? +((r.curVal / r.nav - r.totalInvest) / r.totalInvest * 100).toFixed(2) : 0);
   // 回撤修复收益率 / 总亏损比率（两者都已是百分比，相除后再转成百分比形式），lossRate=0 时置空
   const recoverLossRatio = rows.map((r, i) => (r.lossRate > 0 && r.totalInvest > 0)
@@ -1339,8 +1346,9 @@ const helpContent = {
   colRecoverRate: {
     title: '回撤修复收益率',
     html: `
-      <p>假设标的净值从当前位置涨回顶点（净值 1），你整笔投资的最终收益率：</p>
-      <p><code>回撤修复收益率 = (修复后持仓市值 − 总投入) ÷ 总投入</code>，其中修复后市值 = 当前价值 ÷ 当前净值</p>
+      <p>假设标的净值从当前位置涨回初始净值（默认 1.0000），你整笔投资的最终收益率：</p>
+      <p><code>回撤修复收益率 = (修复后市值 − 总投入) ÷ 总投入</code></p>
+      <p>其中 <code>修复后市值 = 当前价值 ÷ (1 − 回撤比例)</code>：净值从 <code>1 − 回撤比例</code> 涨回 1 时份额不变，市值放大 <code>1 ÷ (1 − 回撤比例)</code> 倍——该算法与初始净值取值无关。</p>
       <p>可化简为 <code>回撤比例 × (1 − 目标系数) ÷ (1 − 回撤比例)</code>——由于目标系数 &lt; 100%，本策略下该值<strong>恒为正数</strong>（显示绿色），不存在"净值回前高仍未回本"的情形。</p>
       <div class="tip">该列全为正且随回撤加深而变大——低位补仓积累的便宜份额，在净值修复时全部兑现为利润，这就是"越跌越买"策略的收益来源。</div>`
   }
@@ -1390,7 +1398,47 @@ document.getElementById('backtestModal').addEventListener('click', e => {
 });
 
 // 拖拽支持
+// 预设方案：都是按总投资反推网格与金额、线性下跌
+const PRESETS = [
+  { name: '线性 / 按总投资 / 回撤5% / 100次 / 系数47.69%', mode: 'linear', inputMode: 'byBudget', initialNav: 1.0, maxDrawdown: 5, targetPct: 47.69, totalBudget: 10000, investCount: 100 },
+  { name: '线性 / 按总投资 / 回撤10% / 100次 / 系数45.66%', mode: 'linear', inputMode: 'byBudget', initialNav: 1.0, maxDrawdown: 10, targetPct: 45.66, totalBudget: 10000, investCount: 100 },
+  { name: '线性 / 按总投资 / 回撤15% / 100次 / 系数43.86%', mode: 'linear', inputMode: 'byBudget', initialNav: 1.0, maxDrawdown: 15, targetPct: 43.86, totalBudget: 10000, investCount: 100 },
+  { name: '线性 / 按总投资 / 回撤20% / 100次 / 系数42.24%', mode: 'linear', inputMode: 'byBudget', initialNav: 1.0, maxDrawdown: 20, targetPct: 42.24, totalBudget: 10000, investCount: 100 },
+  { name: '线性 / 按总投资 / 回撤30% / 100次 / 系数39.43%', mode: 'linear', inputMode: 'byBudget', initialNav: 1.0, maxDrawdown: 30, targetPct: 39.43, totalBudget: 10000, investCount: 100 },
+  { name: '线性 / 按总投资 / 回撤40% / 100次 / 系数37.05%', mode: 'linear', inputMode: 'byBudget', initialNav: 1.0, maxDrawdown: 40, targetPct: 37.05, totalBudget: 10000, investCount: 100 },
+  { name: '线性 / 按总投资 / 回撤50% / 100次 / 系数35.00%', mode: 'linear', inputMode: 'byBudget', initialNav: 1.0, maxDrawdown: 50, targetPct: 35.00, totalBudget: 10000, investCount: 100 },
+  { name: '线性 / 按总投资 / 回撤50% / 200次 / 系数34.94%', mode: 'linear', inputMode: 'byBudget', initialNav: 1.0, maxDrawdown: 50, targetPct: 34.94, totalBudget: 10000, investCount: 200 },
+  { name: '线性 / 按总投资 / 回撤75% / 400次 / 系数30.80%', mode: 'linear', inputMode: 'byBudget', initialNav: 1.0, maxDrawdown: 75, targetPct: 30.80, totalBudget: 10000, investCount: 400 },
+];
+
+function applyPreset(idx) {
+  const p = PRESETS[idx];
+  document.getElementById('mode').value = p.mode;
+  document.getElementById('inputMode').value = p.inputMode;
+  document.getElementById('initialNav').value = p.initialNav.toFixed(4);
+  document.getElementById('maxDrawdown').value = p.maxDrawdown;
+  document.getElementById('targetPct').value = p.targetPct;
+  document.getElementById('totalBudget').value = p.totalBudget;
+  document.getElementById('investCount').value = p.investCount;
+  updateInputModeVisibility();
+  calculate();
+}
+
+// 初始化预设下拉
 document.addEventListener('DOMContentLoaded', () => {
+  const sel = document.getElementById('presetSelect');
+  if (sel) {
+    PRESETS.forEach((p, i) => {
+      const opt = document.createElement('option');
+      opt.value = i;
+      opt.textContent = p.name;
+      sel.appendChild(opt);
+    });
+    sel.addEventListener('change', e => {
+      if (e.target.value !== '') applyPreset(+e.target.value);
+    });
+  }
+
   const area = document.querySelector('.upload-area');
   if (!area) return;
   ['dragover', 'dragenter'].forEach(ev => area.addEventListener(ev, e => { e.preventDefault(); area.style.background = '#eef0ff'; }));
