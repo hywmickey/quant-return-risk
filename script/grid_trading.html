@@ -362,7 +362,7 @@
       <div class="control-group">
         <label>输入模式<span class="help-icon" data-help="inputMode">?</span></label>
         <select id="inputMode">
-          <option value="byGrid">按网格比例 → 反推次数</option>
+          <option value="byGrid">按网格比例 → 反推档位数</option>
           <option value="byBudget">按总投资 → 反推网格与金额</option>
         </select>
       </div>
@@ -391,7 +391,7 @@
         <input type="number" id="totalBudget" value="10000" step="100" min="1">
       </div>
       <div class="control-group hidden" id="countGroup">
-        <label>投资次数<span class="help-icon" data-help="count">?</span> <span id="budgetHint" style="font-size:11px;color:#e63946;"></span></label>
+        <label>投资档位<span class="help-icon" data-help="count">?</span> <span id="budgetHint" style="font-size:11px;color:#e63946;"></span></label>
         <input type="number" id="investCount" value="10" step="1" min="2" max="500">
       </div>
       <button class="btn" onclick="calculate()">🚀 计算</button>
@@ -418,7 +418,7 @@
       <table id="resultTable">
         <thead>
           <tr>
-            <th>次数<span class="help-icon" data-help="colStep">?</span></th>
+            <th>档位<span class="help-icon" data-help="colStep">?</span></th>
             <th>净值<span class="help-icon" data-help="colNav">?</span></th>
             <th>回撤比例<span class="help-icon" data-help="colLossRatio">?</span></th>
             <th>回撤修复涨幅<span class="help-icon" data-help="colRecoverGain">?</span></th>
@@ -437,12 +437,12 @@
       </table>
     </div>
     <div style="margin-top:14px; display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
-      <button class="btn" id="startBtn" onclick="toggleStart()">🕐 开始投资次数</button>
+      <button class="btn" id="startBtn" onclick="toggleStart()">🕐 开始投资档位</button>
       <button class="btn" id="extendBtn" onclick="toggleExtend()">📈 扩大最大回撤比例</button>
       <button class="btn" onclick="toggleBacktest()">📊 历史回测</button>
       <button class="btn" onclick="exportHTML()">📄 导出 HTML</button>
       <span id="startPanel" style="display:none; gap:8px; align-items:center;">
-        <label style="font-size:13px; color:#555;">开始投资的次数</label>
+        <label style="font-size:13px; color:#555;">开始投资的档位</label>
         <input type="number" id="startStep" step="1" min="0" style="width:80px; padding:6px 8px; border:1px solid #ccc; border-radius:6px;">
         <button class="btn" onclick="applyStart()">应用</button>
         <span id="startHint" style="font-size:12px; color:#4361ee;"></span>
@@ -512,7 +512,7 @@ let lastCalc = null; // 最近一次计算的完整参数与基准总投入，�
 let lastRows = null; // 当前表格展示的数据行（含追加行），用于导出
 
 /**
- * 根据"最大回撤比例"反推下跌次数
+ * 根据"最大回撤比例"反推下跌档位数
  *   linear:   lossRatio = step × grid  →  step = floor(lossRatio / grid)
  *   compound: (1-grid)^step = 1 - lossRatio  →  step = ceil(log(1-lossRatio) / log(1-grid))
  * 约束：净值必须 > 0 → lossRatio < 100%（由输入框 max=99.9 保证）
@@ -528,8 +528,8 @@ function getStepFromDrawdown(mode, grid, maxDrawdownRatio) {
 }
 
 /**
- * 反推：已知 最大回撤比例 + 投资次数（含首次建仓）→ 网格比例
- *   linear:   N-1 次下跌，1 - (N-1)·grid = 1 - D  →  grid = D / (N-1)
+ * 反推：已知 最大回撤比例 + 投资档位（含首次建仓）→ 网格比例
+ *   linear:   N-1 档下跌，1 - (N-1)·grid = 1 - D  →  grid = D / (N-1)
  *   compound: (1-grid)^(N-1) = 1 - D              →  grid = 1 - (1-D)^(1/(N-1))
  */
 function getGridFromBudget(mode, maxDrawdownRatio, investCount) {
@@ -561,14 +561,14 @@ function updateHints() {
     countInput.value = count;
     const g = getGridFromBudget(mode, ddRatio, count);
     budgetHint.textContent = g
-      ? `（推算网格 ${(g * 100).toFixed(2)}%，共 ${count - 1} 次下跌）`
+      ? `（推算网格 ${(g * 100).toFixed(2)}%，共 ${count - 1} 档下跌）`
       : '（参数无效）';
   } else {
     budgetHint.textContent = '';
     const gridPct = parseFloat(document.getElementById('grid').value) / 100;
     const step = getStepFromDrawdown(mode, gridPct, ddRatio);
-    stepHint.textContent = `（约 ${step} 次下跌）`;
-    if (step > 500) stepHint.textContent += ' — 次数过多，建议减小回撤比例或增大网格';
+    stepHint.textContent = `（约 ${step} 档下跌）`;
+    if (step > 500) stepHint.textContent += ' — 档位过多，建议减小回撤比例或增大网格';
   }
 }
 
@@ -594,7 +594,7 @@ function calculate() {
   navInput.value = initialNav.toFixed(4);
 
   if (inputMode === 'byBudget') {
-    // 总投资 + 投资次数 + 最大回撤 + 目标系数  →  反推网格与每次金额
+    // 总投资 + 投资档位 + 最大回撤 + 目标系数  →  反推网格与每档金额
     const budgetInput = document.getElementById('totalBudget');
     const budget = Math.max(1, parseFloat(budgetInput.value) || 1000);
     const countInput = document.getElementById('investCount');
@@ -617,14 +617,14 @@ function calculate() {
     renderFormula(mode, grid, targetRatio, {
       investCount, maxStep, budget,
       gridFormula: mode === 'linear'
-        ? `网格比例 = 最大回撤 ÷ (投资次数 − 1) = ${(ddRatio * 100).toFixed(2)}% ÷ ${maxStep}`
-        : `网格比例 = 1 − (1 − 最大回撤)^(1/(投资次数−1)) = 1 − (1 − ${(ddRatio * 100).toFixed(2)}%)^(1/${maxStep})`
+        ? `网格比例 = 最大回撤 ÷ (投资档位 − 1) = ${(ddRatio * 100).toFixed(2)}% ÷ ${maxStep}`
+        : `网格比例 = 1 − (1 − 最大回撤)^(1/(投资档位−1)) = 1 − (1 − ${(ddRatio * 100).toFixed(2)}%)^(1/${maxStep})`
     });
     refreshViews();
     return;
   }
 
-  // 原有模式：按网格比例反推次数
+  // 原有模式：按网格比例反推档位数
   const gridPct = parseFloat(document.getElementById('grid').value) / 100;
   const maxStep = getStepFromDrawdown(mode, gridPct, ddRatio);
   const initialInvest = parseFloat(document.getElementById('initialInvest').value) || 1;
@@ -638,7 +638,7 @@ function calculate() {
   refreshViews();
 }
 
-// 统一刷新表格/指标/图表：lastRows 为基准行（原计划+回撤追加），再叠加"开始投资次数"变换
+// 统一刷新表格/指标/图表：lastRows 为基准行（原计划+回撤追加），再叠加"开始投资档位"变换
 let lastDisplayRows = null;
 function refreshViews() {
   if (!lastCalc || !lastRows) return;
@@ -651,7 +651,7 @@ function refreshViews() {
   updateExtendHint(rows[rows.length - 1].totalInvest);
 }
 
-// ========== 开始投资次数（从第 N 次下跌才建仓） ==========
+// ========== 开始投资档位（从第 N 档下跌才建仓） ==========
 // N 之前的行清零；第 N 行的增加资金 = 原计划该行总投入；之后的行增加资金不变、其余按原公式递推
 function applyStartStep(rows, startStep, grid) {
   const out = [];
@@ -694,8 +694,8 @@ function updateStartHint() {
   const hint = document.getElementById('startHint');
   if (!lastCalc) { hint.textContent = ''; return; }
   hint.textContent = lastCalc.startStep != null
-    ? `当前从第 ${lastCalc.startStep} 次开始投资（0 表示从头开始）`
-    : '未启用（从第 0 次建仓开始）';
+    ? `当前从第 ${lastCalc.startStep} 档开始投资（0 表示从头开始）`
+    : '未启用（从第 0 档建仓开始）';
 }
 
 function applyStart() {
@@ -774,7 +774,7 @@ function confirmExport() {
 }
 function doExportHTML(name) {
   const c = lastCalc;
-  const rows = lastDisplayRows || lastRows; // 导出当前展示的数据（含"开始投资次数"变换）
+  const rows = lastDisplayRows || lastRows; // 导出当前展示的数据（含"开始投资档位"变换）
   const finalTotal = c.plannedTotal;
   const newTotal = rows[rows.length - 1].totalInvest;
   const fmtP = v => (v * 100).toFixed(2) + '%';
@@ -783,7 +783,7 @@ function doExportHTML(name) {
   // 输入参数表
   const params = [
     ['下跌模型', c.mode === 'linear' ? '线性下跌（净值 −= 网格比例）' : '复利下跌（净值 ×= 1 − 网格比例）'],
-    ['输入模式', c.inputMode === 'byBudget' ? '按总投资 → 反推网格与金额' : '按网格比例 → 反推次数'],
+    ['输入模式', c.inputMode === 'byBudget' ? '按总投资 → 反推网格与金额' : '按网格比例 → 反推档位数'],
     ['初始净值', c.initialNav.toFixed(4)],
     ['网格比例', fmtP(c.grid) + (c.inputMode === 'byBudget' ? '（由参数反推）' : '')],
     ['计划最大回撤比例', fmtP(c.ddRatio)],
@@ -791,12 +791,12 @@ function doExportHTML(name) {
   ];
   if (c.inputMode === 'byBudget') {
     params.push(['总投资金额', fmtM(c.plannedTotal)]);
-    params.push(['投资次数（含首次建仓）', c.maxStep + 1]);
+    params.push(['投资档位（含首次建仓）', c.maxStep + 1]);
   } else {
     params.push(['初始投入金额', fmtM(c.initialInvest)]);
   }
   if (c.startStep != null) {
-    params.push(['开始投资次数', `第 ${c.startStep} 次（第 ${c.startStep} 次之前未投入）`]);
+    params.push(['开始投资档位', `第 ${c.startStep} 档（第 ${c.startStep} 档之前未投入）`]);
   }
   if (c.extendedDd != null) {
     params.push(['实际最大回撤比例（扩大后）', fmtP(c.extendedDd)]);
@@ -804,8 +804,8 @@ function doExportHTML(name) {
     params.push(['变更总投入', fmtM(newTotal) + `（超支 +${((newTotal / c.plannedTotal - 1) * 100).toFixed(2)}%）`]);
   }
 
-  const headers = ['次数', '净值', '回撤比例', '回撤修复涨幅', '增加资金', '上次总价值', '当前价值', '总投入', '资金使用率', '总亏损价值', '总亏损比率', '盈亏平衡涨幅', '回撤修复收益率'];
-  // 过滤掉"开始投资次数"之前的置灰行
+  const headers = ['档位', '净值', '回撤比例', '回撤修复涨幅', '增加资金', '上次总价值', '当前价值', '总投入', '资金使用率', '总亏损价值', '总亏损比率', '盈亏平衡涨幅', '回撤修复收益率'];
+  // 过滤掉"开始投资档位"之前的置灰行
   const exportRows = rows.filter(r => !(c.startStep != null && r.step < c.startStep));
   const bodyRows = exportRows.map(r => {
     const ext = c.extendedDd != null && r.step > c.maxStep;
@@ -856,7 +856,7 @@ function doExportHTML(name) {
   })()}</table>
 <h2>详细数据表</h2>
 <table class="data"><thead><tr>${headers.map(h => `<th>${h}</th>`).join('')}</tr></thead><tbody>${bodyRows}</tbody></table>
-<p class="note">补仓公式：增加资金 = (上次总投入 − 上次总价值) ÷ (当前回撤比例 × 目标系数) − 上次总投入${c.startStep != null ? `；已过滤"开始投资次数"之前的未投入行（第 ${c.startStep} 次才首次投入）` : ''}${c.extendedDd != null ? '；浅蓝背景行为"扩大最大回撤"后追加的行，其资金使用率以原计划总投入为分母（可超过 100%）' : ''}。生成时间：${new Date().toLocaleString('zh-CN')}</p>
+<p class="note">补仓公式：增加资金 = (上次总投入 − 上次总价值) ÷ (当前回撤比例 × 目标系数) − 上次总投入${c.startStep != null ? `；已过滤"开始投资档位"之前的未投入行（第 ${c.startStep} 档才首次投入）` : ''}${c.extendedDd != null ? '；浅蓝背景行为"扩大最大回撤"后追加的行，其资金使用率以原计划总投入为分母（可超过 100%）' : ''}。生成时间：${new Date().toLocaleString('zh-CN')}</p>
 </body></html>`;
 
   const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
@@ -936,15 +936,15 @@ function fmtPct(n) {
 
 function renderFormula(mode, grid, targetRatio, extra) {
   const modeLabel = mode === 'linear'
-    ? '线性下跌（净值 = 1 − 次数 × 网格比例）'
-    : '复利下跌（净值 = (1 − 网格比例)^次数）';
+    ? '线性下跌（净值 = 1 − 档位 × 网格比例）'
+    : '复利下跌（净值 = (1 − 网格比例)^档位）';
   const gridPct = (grid * 100).toFixed(2);
   const targetPct = (targetRatio * 100).toFixed(2);
 
   const gridDerive = extra ? `
     <div>
       <strong>网格推算：</strong><code>${extra.gridFormula}</code>
-      → 网格比例 = <code>${(grid * 100).toFixed(2)}%</code>，共 <code>${extra.maxStep}</code> 次下跌 / <code>${extra.investCount}</code> 次投入
+      → 网格比例 = <code>${(grid * 100).toFixed(2)}%</code>，共 <code>${extra.maxStep}</code> 档下跌 / <code>${extra.investCount}</code> 档投入
     </div>` : '';
 
   document.getElementById('formulaBox').innerHTML = `
@@ -961,7 +961,7 @@ function renderFormula(mode, grid, targetRatio, extra) {
       <code>增加资金 = (上次总投入 − 上次总价值) ÷ (当前回撤比例 × 目标系数) − 上次总投入</code>
     </div>
     <div>
-      <strong>约束：</strong>每补一次仓，总亏损比率精确提升 <code>网格比例 × 目标系数</code>
+      <strong>约束：</strong>每补一档仓，总亏损比率精确提升 <code>网格比例 × 目标系数</code>
       ${mode === 'linear' ? `（本模型下恒等于 <code>${(grid * targetRatio * 100).toFixed(2)}%</code>）` : ''}
     </div>
     <div class="vars">
@@ -1016,7 +1016,7 @@ function renderSummary(rows, initialNav = 1, gridRatio = 0) {
   const ratioMinMax = maxInvest > 0 ? (minInvest / maxInvest * 100) : 0;
   // 最大增加资金 所在的档位
   const maxInvestRow = investedRows.reduce((a, b) => (b.invest > a.invest ? b : a), investedRows[0]);
-  // 倒数第二次 → 倒数第一次 之间的净值下跌百分比
+  // 倒数第二档 → 倒数第一档 之间的净值下跌百分比
   let lastStepDD = null;
   if (investedRows.length >= 2) {
     const prev = investedRows[investedRows.length - 2];
@@ -1085,7 +1085,7 @@ function renderChart(rows, targetRatio) {
       extraCssText: 'font-family: "SF Mono", Menlo, Consolas, "Courier New", monospace; font-size: 12px;',
       formatter: function(params) {
         const idx = params[0].dataIndex;
-        let html = `<div style="font-weight:bold; margin-bottom:4px;">第 ${params[0].axisValue} 次</div>`;
+        let html = `<div style="font-weight:bold; margin-bottom:4px;">第 ${params[0].axisValue} 档</div>`;
         // 先展示金额型（不画线），统一 2 位小数
         html += `<div style="display:flex; justify-content:space-between; gap:18px;"><span>🟧 总投入</span><span>${totalInvests[idx].toFixed(2)}</span></div>`;
         html += `<div style="display:flex; justify-content:space-between; gap:18px;"><span>🟦 当前价值</span><span>${curVals[idx].toFixed(2)}</span></div>`;
@@ -1099,7 +1099,7 @@ function renderChart(rows, targetRatio) {
     },
     legend: { data: ['资金使用率', '回撤比例', '总亏损比率', '回撤修复收益率', '修复/亏损比'], top: 0, selected: { '修复/亏损比': false } },
     grid: { left: 50, right: 60, top: 50, bottom: 30 },
-    xAxis: { type: 'category', name: '下跌次数', data: steps, onZero: true },
+    xAxis: { type: 'category', name: '下跌档位', data: steps, onZero: true },
     yAxis: { type: 'value', name: '比率(%)', min: (v) => Math.min(0, Math.floor(v.min)), max: (v) => Math.max(100, Math.ceil(v.max)) },
     series: [
       {
@@ -1154,20 +1154,20 @@ const helpContent = {
     html: `
       <p>决定净值如何逐步下跌，影响整个补仓序列的形态。</p>
       <ul>
-        <li><b>线性下跌</b>：<code>净值 = 1 − 次数 × 网格比例</code>。每次固定减去网格比例，回撤与次数成正比，第 <code>1 ÷ 网格比例</code> 次后净值归零。适合模拟匀速下跌。</li>
-        <li><b>复利下跌</b>：<code>净值 = (1 − 网格比例) ^ 次数</code>。每次按当前净值打折，越往后每次的实际跌幅越小，净值永远不会跌到 0。更接近真实市场的连续跌法。</li>
+        <li><b>线性下跌</b>：<code>净值 = 1 − 档位 × 网格比例</code>。每档固定减去网格比例，回撤与档位成正比，第 <code>1 ÷ 网格比例</code> 档后净值归零。适合模拟匀速下跌。</li>
+        <li><b>复利下跌</b>：<code>净值 = (1 − 网格比例) ^ 档位</code>。每档按当前净值打折，越往后每档的实际跌幅越小，净值永远不会跌到 0。更接近真实市场的连续跌法。</li>
       </ul>
-      <div class="tip">同样的网格比例下，复利模型达到相同回撤需要更多次下跌，补仓资金分布更平缓。</div>`
+      <div class="tip">同样的网格比例下，复利模型达到相同回撤需要更多档位，补仓资金分布更平缓。</div>`
   },
   inputMode: {
     title: '输入模式',
     html: `
       <p>选择"知道什么、反推什么"：</p>
       <ul>
-        <li><b>按网格比例 → 反推次数</b>：你给定每格下跌幅度，系统根据最大回撤反推共下跌多少次。适合"我打算每跌 5% 补一次"的场景。</li>
-        <li><b>按总投资 → 反推网格与金额</b>：你给定总预算和总投入次数，系统反推出网格比例和每次应投入的金额。适合"我总共只有 1 万元、计划投 11 次"的预算约束场景。</li>
+        <li><b>按网格比例 → 反推档位数</b>：你给定每格下跌幅度，系统根据最大回撤反推共下跌多少档。适合"我打算每跌 5% 补一次"的场景。</li>
+        <li><b>按总投资 → 反推网格与金额</b>：你给定总预算和总档位数，系统反推出网格比例和每档应投入的金额。适合"我总共只有 1 万元、计划投 11 档"的预算约束场景。</li>
       </ul>
-      <div class="tip">按投资模式下，先用初始投入 = 1 归一化计算各次投入的比例关系，再整体等比缩放到你的总预算，保证总投入精确等于预算。</div>`
+      <div class="tip">按投资模式下，先用初始投入 = 1 归一化计算各档投入的比例关系，再整体等比缩放到你的总预算，保证总投入精确等于预算。</div>`
   },
   initialNav: {
     title: '初始净值',
@@ -1184,18 +1184,18 @@ const helpContent = {
     html: `
       <p>每触发一次补仓，净值下跌的幅度。例如 5% 表示净值每跌 5% 补一次仓。</p>
       <ul>
-        <li>网格越大 → 补仓次数越少、单次补仓金额越大，适合波动大的标的。</li>
-        <li>网格越小 → 补仓次数越多、资金摊得越细，但需要更多次下跌才到达最大回撤。</li>
+        <li>网格越大 → 补仓档位越少、单档补仓金额越大，适合波动大的标的。</li>
+        <li>网格越小 → 补仓档位越多、资金摊得越细，但需要更多档下跌才到达最大回撤。</li>
       </ul>
-      <div class="tip">网格与目标系数共同决定每补一次仓总亏损比率上升多少：<code>网格比例 × 目标系数</code>。例如 5% × 50% = 每步上升 2.5%。</div>`
+      <div class="tip">网格与目标系数共同决定每补一档仓总亏损比率上升多少：<code>网格比例 × 目标系数</code>。例如 5% × 50% = 每档上升 2.5%。</div>`
   },
   maxDrawdown: {
     title: '最大回撤比例 (%)',
     html: `
       <p>你预估标的从顶点最多跌多少（即策略覆盖的最坏情况），净值从 1 跌到 <code>1 − 最大回撤</code> 时停止补仓。</p>
       <ul>
-        <li>按网格模式：与网格比例共同反推下跌次数（线性：<code>次数 = 回撤 ÷ 网格比例</code>；复利：<code>次数 = ln(1−回撤) ÷ ln(1−网格比例)</code>）。</li>
-        <li>按投资模式：与投资次数共同反推网格比例。</li>
+        <li>按网格模式：与网格比例共同反推下跌档位（线性：<code>档位 = 回撤 ÷ 网格比例</code>；复利：<code>档位 = ln(1−回撤) ÷ ln(1−网格比例)</code>）。</li>
+        <li>按投资模式：与投资档位共同反推网格比例。</li>
       </ul>
       <div class="tip">回撤设得越大，需要的后备资金越多。建议参考标的历史最大回撤设定。</div>`
   },
@@ -1208,47 +1208,47 @@ const helpContent = {
         <li>系数越小（如 10%）→ 补仓越激进，浮亏越小，但消耗资金越快、总投入越大。</li>
         <li>系数越大（如 90%）→ 补仓越保守，接近不补仓，浮亏接近净值本身的回撤。</li>
       </ul>
-      <div class="tip">数学上每补一次仓，总亏损比率精确上升 <code>网格比例 × 系数</code>。系数太小且网格太密时，后期补仓金额会急剧放大，注意总资金是否够用。</div>`
+      <div class="tip">数学上每补一档仓，总亏损比率精确上升 <code>网格比例 × 系数</code>。系数太小且网格太密时，后期补仓金额会急剧放大，注意总资金是否够用。</div>`
   },
   initial: {
     title: '初始投入金额',
     html: `
-      <p>第 0 次（建仓时）投入的金额，也是后续补仓金额的基准锚点。</p>
+      <p>第 0 档（建仓时）投入的金额，也是后续补仓金额的基准锚点。</p>
       <ul>
         <li>设为 1 时，表格中的金额可直接读作"相对初始投入的倍数"，便于观察资金放大幅度。</li>
         <li>设为实际金额（如 10000）时，表格直接显示真实金额。</li>
       </ul>
-      <div class="tip">各次补仓金额与初始投入成固定比例关系（由网格比例、回撤、目标系数决定），改变初始投入只会整体等比缩放，不改变策略结构。</div>`
+      <div class="tip">各档补仓金额与初始投入成固定比例关系（由网格比例、回撤、目标系数决定），改变初始投入只会整体等比缩放，不改变策略结构。</div>`
   },
   budget: {
     title: '总投资金额',
     html: `
       <p>你计划投入的总预算（含首次建仓）。系统保证最后一次补仓完成后，<b>累计总投入精确等于该预算</b>。</p>
       <ul>
-        <li>计算方式：先按初始投入 = 1 跑一遍策略，得到每次投入的比例关系，再整体等比缩放使总和等于预算。</li>
+        <li>计算方式：先按初始投入 = 1 跑一遍策略，得到每档投入的比例关系，再整体等比缩放使总和等于预算。</li>
         <li>首次建仓金额 = 预算 × 归一化比例，自动算出，无需手动填。</li>
       </ul>`
   },
   count: {
-    title: '投资次数',
+    title: '投资档位',
     html: `
-      <p>总共买入多少次，<b>含首次建仓</b>。例如 11 次 = 第 0 行建仓 + 10 次下跌补仓。</p>
+      <p>总共买多少档，<b>含首次建仓</b>。例如 11 档 = 第 0 档建仓 + 10 档下跌补仓。</p>
       <ul>
-        <li>次数越多 → 反推出的网格越细（<code>网格比例 = 回撤 ÷ (次数 − 1)</code>，线性模型），单次补仓金额越小。</li>
-        <li>次数越少 → 网格越粗，单次补仓金额越大。</li>
+        <li>档位越多 → 反推出的网格越细（<code>网格比例 = 回撤 ÷ (档位 − 1)</code>，线性模型），单档补仓金额越小。</li>
+        <li>档位越少 → 网格越粗，单档补仓金额越大。</li>
       </ul>
-      <div class="tip">配合总投资金额使用：预算固定时，次数越多资金摊得越薄，但每次补仓的摊薄效果也越弱。</div>`
+      <div class="tip">配合总投资金额使用：预算固定时，档位越多资金摊得越薄，但每档补仓的摊薄效果也越弱。</div>`
   },
   colStep: {
-    title: '次数',
+    title: '档位',
     html: `
-      <p>下跌/买入的序号。<b>第 0 次 = 首次建仓</b>（初始投入），之后每触发一次网格下跌序号 +1。</p>
-      <div class="tip">例如"投资次数 11"对应表格第 0 行到第 10 行，共 10 次下跌补仓。</div>`
+      <p>下跌/买入的序号。<b>第 0 档 = 首次建仓</b>（初始投入），之后每触发一档网格下跌序号 +1。</p>
+      <div class="tip">例如"投资档位 11"对应表格第 0 档到第 10 档，共 10 档下跌补仓。</div>`
   },
   colNav: {
     title: '净值',
     html: `
-      <p>标的在该次下跌后的净值：<code>净值 = 初始净值 × (1 − 回撤比例)</code>。</p>
+      <p>标的在该档下跌后的净值：<code>净值 = 初始净值 × (1 − 回撤比例)</code>。</p>
       <ul>
         <li>第 0 行 = 初始净值（默认 1）</li>
         <li>修改参数区的"初始净值"可显示真实标的的净值轨迹（如 1.85 → 1.76 → ...）</li>
@@ -1260,8 +1260,8 @@ const helpContent = {
     html: `
       <p>标的净值从顶点（净值 1）累计下跌的比例：<code>回撤比例 = 1 − 当前净值</code>。</p>
       <ul>
-        <li>线性模型：<code>回撤比例 = 次数 × 网格比例</code></li>
-        <li>复利模型：<code>回撤比例 = 1 − (1 − 网格比例)^次数</code></li>
+        <li>线性模型：<code>回撤比例 = 档位 × 网格比例</code></li>
+        <li>复利模型：<code>回撤比例 = 1 − (1 − 网格比例)^档位</code></li>
       </ul>
       <div class="tip">这是"标的本身"的亏损口径，与你账户的实际亏损（总亏损比率）是两个不同的概念。</div>`
   },
@@ -1400,27 +1400,27 @@ document.getElementById('backtestModal').addEventListener('click', e => {
 // 拖拽支持
 // 预设方案：均为按总投资反推网格与金额，分线性下跌与复利下跌两组
 const PRESETS = [
-  { name: '线性 / 按总投资 / 回撤5% / 100次 / 系数47.6931%', mode: 'linear', inputMode: 'byBudget', initialNav: 1.0, maxDrawdown: 5, targetPct: 47.6931, totalBudget: 10000, investCount: 100 },
-  { name: '线性 / 按总投资 / 回撤10% / 100次 / 系数45.6690%', mode: 'linear', inputMode: 'byBudget', initialNav: 1.0, maxDrawdown: 10, targetPct: 45.6690, totalBudget: 10000, investCount: 100 },
-  { name: '线性 / 按总投资 / 回撤15% / 100次 / 系数43.8676%', mode: 'linear', inputMode: 'byBudget', initialNav: 1.0, maxDrawdown: 15, targetPct: 43.8676, totalBudget: 10000, investCount: 100 },
-  { name: '线性 / 按总投资 / 回撤20% / 100次 / 系数42.2469%', mode: 'linear', inputMode: 'byBudget', initialNav: 1.0, maxDrawdown: 20, targetPct: 42.2469, totalBudget: 10000, investCount: 100 },
-  { name: '线性 / 按总投资 / 回撤30% / 100次 / 系数39.4313%', mode: 'linear', inputMode: 'byBudget', initialNav: 1.0, maxDrawdown: 30, targetPct: 39.4313, totalBudget: 10000, investCount: 100 },
-  { name: '线性 / 按总投资 / 回撤40% / 100次 / 系数37.0519%', mode: 'linear', inputMode: 'byBudget', initialNav: 1.0, maxDrawdown: 40, targetPct: 37.0519, totalBudget: 10000, investCount: 100 },
-  { name: '线性 / 按总投资 / 回撤50% / 100次 / 系数35.0018%', mode: 'linear', inputMode: 'byBudget', initialNav: 1.0, maxDrawdown: 50, targetPct: 35.0018, totalBudget: 10000, investCount: 100 },
-  { name: '线性 / 按总投资 / 回撤50% / 200次 / 系数34.9463%', mode: 'linear', inputMode: 'byBudget', initialNav: 1.0, maxDrawdown: 50, targetPct: 34.9463, totalBudget: 10000, investCount: 200 },
-  { name: '线性 / 按总投资 / 回撤60% / 200次 / 系数33.1497%', mode: 'linear', inputMode: 'byBudget', initialNav: 1.0, maxDrawdown: 60, targetPct: 33.1497, totalBudget: 10000, investCount: 200 },
-  { name: '线性 / 按总投资 / 回撤75% / 400次 / 系数30.8004%', mode: 'linear', inputMode: 'byBudget', initialNav: 1.0, maxDrawdown: 75, targetPct: 30.8004, totalBudget: 10000, investCount: 400 },
-  { name: '线性 / 按总投资 / 回撤90% / 500次 / 系数28.8246%', mode: 'linear', inputMode: 'byBudget', initialNav: 1.0, maxDrawdown: 90, targetPct: 28.8246, totalBudget: 10000, investCount: 500 },
-  { name: '复利 / 按总投资 / 回撤5% / 100次 / 系数50.2343%', mode: 'compound', inputMode: 'byBudget', initialNav: 1.0, maxDrawdown: 5, targetPct: 50.2343, totalBudget: 10000, investCount: 100 },
-  { name: '复利 / 按总投资 / 回撤10% / 100次 / 系数50.4807%', mode: 'compound', inputMode: 'byBudget', initialNav: 1.0, maxDrawdown: 10, targetPct: 50.4807, totalBudget: 10000, investCount: 100 },
-  { name: '复利 / 按总投资 / 回撤20% / 100次 / 系数51.0146%', mode: 'compound', inputMode: 'byBudget', initialNav: 1.0, maxDrawdown: 20, targetPct: 51.0146, totalBudget: 10000, investCount: 100 },
-  { name: '复利 / 按总投资 / 回撤30% / 100次 / 系数51.6152%', mode: 'compound', inputMode: 'byBudget', initialNav: 1.0, maxDrawdown: 30, targetPct: 51.6152, totalBudget: 10000, investCount: 100 },
-  { name: '复利 / 按总投资 / 回撤40% / 100次 / 系数52.3016%', mode: 'compound', inputMode: 'byBudget', initialNav: 1.0, maxDrawdown: 40, targetPct: 52.3016, totalBudget: 10000, investCount: 100 },
-  { name: '复利 / 按总投资 / 回撤50% / 100次 / 系数53.1032%', mode: 'compound', inputMode: 'byBudget', initialNav: 1.0, maxDrawdown: 50, targetPct: 53.1032, totalBudget: 10000, investCount: 100 },
-  { name: '复利 / 按总投资 / 回撤60% / 100次 / 系数54.068%', mode: 'compound', inputMode: 'byBudget', initialNav: 1.0, maxDrawdown: 60, targetPct: 54.068, totalBudget: 10000, investCount: 100 },
-  { name: '复利 / 按总投资 / 回撤70% / 200次 / 系数54.8019%', mode: 'compound', inputMode: 'byBudget', initialNav: 1.0, maxDrawdown: 70, targetPct: 54.8019, totalBudget: 10000, investCount: 200 },
-  { name: '复利 / 按总投资 / 回撤75% / 200次 / 系数55.492%', mode: 'compound', inputMode: 'byBudget', initialNav: 1.0, maxDrawdown: 75, targetPct: 55.492, totalBudget: 10000, investCount: 200 },
-  { name: '复利 / 按总投资 / 回撤90% / 300次 / 系数58.3397%', mode: 'compound', inputMode: 'byBudget', initialNav: 1.0, maxDrawdown: 90, targetPct: 58.3397, totalBudget: 10000, investCount: 300 },
+  { name: '线性 / 按总投资 / 回撤5% / 100档 / 系数47.6931%', mode: 'linear', inputMode: 'byBudget', initialNav: 1.0, maxDrawdown: 5, targetPct: 47.6931, totalBudget: 10000, investCount: 100 },
+  { name: '线性 / 按总投资 / 回撤10% / 100档 / 系数45.6690%', mode: 'linear', inputMode: 'byBudget', initialNav: 1.0, maxDrawdown: 10, targetPct: 45.6690, totalBudget: 10000, investCount: 100 },
+  { name: '线性 / 按总投资 / 回撤15% / 100档 / 系数43.8676%', mode: 'linear', inputMode: 'byBudget', initialNav: 1.0, maxDrawdown: 15, targetPct: 43.8676, totalBudget: 10000, investCount: 100 },
+  { name: '线性 / 按总投资 / 回撤20% / 100档 / 系数42.2469%', mode: 'linear', inputMode: 'byBudget', initialNav: 1.0, maxDrawdown: 20, targetPct: 42.2469, totalBudget: 10000, investCount: 100 },
+  { name: '线性 / 按总投资 / 回撤30% / 100档 / 系数39.4313%', mode: 'linear', inputMode: 'byBudget', initialNav: 1.0, maxDrawdown: 30, targetPct: 39.4313, totalBudget: 10000, investCount: 100 },
+  { name: '线性 / 按总投资 / 回撤40% / 100档 / 系数37.0519%', mode: 'linear', inputMode: 'byBudget', initialNav: 1.0, maxDrawdown: 40, targetPct: 37.0519, totalBudget: 10000, investCount: 100 },
+  { name: '线性 / 按总投资 / 回撤50% / 100档 / 系数35.0018%', mode: 'linear', inputMode: 'byBudget', initialNav: 1.0, maxDrawdown: 50, targetPct: 35.0018, totalBudget: 10000, investCount: 100 },
+  { name: '线性 / 按总投资 / 回撤50% / 200档 / 系数34.9463%', mode: 'linear', inputMode: 'byBudget', initialNav: 1.0, maxDrawdown: 50, targetPct: 34.9463, totalBudget: 10000, investCount: 200 },
+  { name: '线性 / 按总投资 / 回撤60% / 200档 / 系数33.1497%', mode: 'linear', inputMode: 'byBudget', initialNav: 1.0, maxDrawdown: 60, targetPct: 33.1497, totalBudget: 10000, investCount: 200 },
+  { name: '线性 / 按总投资 / 回撤75% / 400档 / 系数30.8004%', mode: 'linear', inputMode: 'byBudget', initialNav: 1.0, maxDrawdown: 75, targetPct: 30.8004, totalBudget: 10000, investCount: 400 },
+  { name: '线性 / 按总投资 / 回撤90% / 500档 / 系数28.8246%', mode: 'linear', inputMode: 'byBudget', initialNav: 1.0, maxDrawdown: 90, targetPct: 28.8246, totalBudget: 10000, investCount: 500 },
+  { name: '复利 / 按总投资 / 回撤5% / 100档 / 系数50.2343%', mode: 'compound', inputMode: 'byBudget', initialNav: 1.0, maxDrawdown: 5, targetPct: 50.2343, totalBudget: 10000, investCount: 100 },
+  { name: '复利 / 按总投资 / 回撤10% / 100档 / 系数50.4807%', mode: 'compound', inputMode: 'byBudget', initialNav: 1.0, maxDrawdown: 10, targetPct: 50.4807, totalBudget: 10000, investCount: 100 },
+  { name: '复利 / 按总投资 / 回撤20% / 100档 / 系数51.0146%', mode: 'compound', inputMode: 'byBudget', initialNav: 1.0, maxDrawdown: 20, targetPct: 51.0146, totalBudget: 10000, investCount: 100 },
+  { name: '复利 / 按总投资 / 回撤30% / 100档 / 系数51.6152%', mode: 'compound', inputMode: 'byBudget', initialNav: 1.0, maxDrawdown: 30, targetPct: 51.6152, totalBudget: 10000, investCount: 100 },
+  { name: '复利 / 按总投资 / 回撤40% / 100档 / 系数52.3016%', mode: 'compound', inputMode: 'byBudget', initialNav: 1.0, maxDrawdown: 40, targetPct: 52.3016, totalBudget: 10000, investCount: 100 },
+  { name: '复利 / 按总投资 / 回撤50% / 100档 / 系数53.1032%', mode: 'compound', inputMode: 'byBudget', initialNav: 1.0, maxDrawdown: 50, targetPct: 53.1032, totalBudget: 10000, investCount: 100 },
+  { name: '复利 / 按总投资 / 回撤60% / 100档 / 系数54.068%', mode: 'compound', inputMode: 'byBudget', initialNav: 1.0, maxDrawdown: 60, targetPct: 54.068, totalBudget: 10000, investCount: 100 },
+  { name: '复利 / 按总投资 / 回撤70% / 200档 / 系数54.8019%', mode: 'compound', inputMode: 'byBudget', initialNav: 1.0, maxDrawdown: 70, targetPct: 54.8019, totalBudget: 10000, investCount: 200 },
+  { name: '复利 / 按总投资 / 回撤75% / 200档 / 系数55.492%', mode: 'compound', inputMode: 'byBudget', initialNav: 1.0, maxDrawdown: 75, targetPct: 55.492, totalBudget: 10000, investCount: 200 },
+  { name: '复利 / 按总投资 / 回撤90% / 300档 / 系数58.3397%', mode: 'compound', inputMode: 'byBudget', initialNav: 1.0, maxDrawdown: 90, targetPct: 58.3397, totalBudget: 10000, investCount: 300 },
 ];
 
 function applyPreset(idx) {
@@ -1514,7 +1514,7 @@ function simulateBacktest(csv, levels, initialInvest = 0) {
   const levelTriggered = new Array(levels.length).fill(false);
   let rollingHigh = csv[0].dwjz;
   let maxDrawdownSeen = 0; // 历史最大回撤（到昨日为止）
-  // 档位0：回测起始日按当日净值建仓（对应详细数据表的第 0 次）
+  // 档位0：回测起始日按当日净值建仓（对应详细数据表的第 0 档）
   let shares = initialInvest > 0 ? initialInvest / csv[0].dwjz : 0;
   let totalInvest = initialInvest > 0 ? initialInvest : 0;
   let dividendShares = 0; // 累计分红份额
