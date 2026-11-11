@@ -421,6 +421,7 @@
             <th>档位<span class="help-icon" data-help="colStep">?</span></th>
             <th>净值<span class="help-icon" data-help="colNav">?</span></th>
             <th>回撤比例<span class="help-icon" data-help="colLossRatio">?</span></th>
+            <th>跌幅<span class="help-icon" data-help="colStepDrop">?</span></th>
             <th>回撤修复涨幅<span class="help-icon" data-help="colRecoverGain">?</span></th>
             <th>增加资金<span class="help-icon" data-help="colInvest">?</span></th>
             <th>上次总价值<span class="help-icon" data-help="colPrevVal">?</span></th>
@@ -804,15 +805,19 @@ function doExportHTML(name) {
     params.push(['变更总投入', fmtM(newTotal) + `（超支 +${((newTotal / c.plannedTotal - 1) * 100).toFixed(2)}%）`]);
   }
 
-  const headers = ['档位', '净值', '回撤比例', '回撤修复涨幅', '增加资金', '上次总价值', '当前价值', '总投入', '资金使用率', '总亏损价值', '总亏损比率', '盈亏平衡涨幅', '回撤修复收益率'];
+  const headers = ['档位', '净值', '回撤比例', '跌幅', '回撤修复涨幅', '增加资金', '上次总价值', '当前价值', '总投入', '资金使用率', '总亏损价值', '总亏损比率', '盈亏平衡涨幅', '回撤修复收益率'];
   // 过滤掉"开始投资档位"之前的置灰行
   const exportRows = rows.filter(r => !(c.startStep != null && r.step < c.startStep));
   const bodyRows = exportRows.map(r => {
     const ext = c.extendedDd != null && r.step > c.maxStep;
+    // 跌幅取完整 rows 中的上一行（首行或被过滤后的首行也能取到其真实上一行）
+    const prevRow = r.step > 0 ? rows[r.step - 1] : null;
+    const stepDrop = prevRow && prevRow.nav > 0 ? (prevRow.nav - r.nav) / prevRow.nav : null;
     return `<tr${ext ? ` class="ext"` : ''}>
       <td>${r.step}</td>
       <td>${(c.initialNav * r.nav).toFixed(4)}</td>
       <td>${fmtP(r.lossRatio)}</td>
+      <td>${stepDrop != null ? fmtP(stepDrop) : '-'}</td>
       <td>${r.nav > 0 ? fmtP(r.lossRatio / r.nav) : '-'}</td>
       <td>${fmtM(r.invest)}</td>
       <td>${fmtM(r.prevVal)}</td>
@@ -979,15 +984,19 @@ function renderTable(rows, targetRatio, decimals = 2, initialNav = 1, plannedTot
   const tbody = document.getElementById('tableBody');
   // 资金使用率的分母：计划总投入（扩大回撤追加行时保持原计划值，因此可超过 100%）
   const finalTotal = plannedTotal || (rows.length > 0 ? rows[rows.length - 1].totalInvest : 0);
-  tbody.innerHTML = rows.map(r => {
+  tbody.innerHTML = rows.map((r, i) => {
     const isOffTrack = r.lossRate > r.lossRatio * targetRatio + 1e-6;
     const isExtended = baseMaxStep != null && r.step > baseMaxStep;
     const isSkipped = startStep != null && r.step < startStep;
     const cls = [isOffTrack ? 'loss-ratio-50' : '', isExtended ? 'row-extended' : '', isSkipped ? 'row-skipped' : ''].filter(Boolean).join(' ');
+    // 跌幅 = 上一行净值相对本行净值的下跌幅度：上一行是顶点起算（第 0 行无上一行，显示 -）
+    const prevRow = i > 0 ? rows[i - 1] : null;
+    const stepDrop = prevRow && prevRow.nav > 0 ? (prevRow.nav - r.nav) / prevRow.nav : null;
     return `<tr class="${cls}">
       <td>${r.step}</td>
       <td class="nav-cell">${(initialNav * r.nav).toFixed(4)}</td>
       <td class="nav-cell">${(r.lossRatio * 100).toFixed(2)}%</td>
+      <td class="nav-cell">${stepDrop != null ? fmtPct(stepDrop) : '-'}</td>
       <td class="nav-cell">${r.nav > 0 ? fmtPct(r.lossRatio / r.nav) : '-'}</td>
       <td class="nav-cell">${r.invest.toFixed(decimals)}</td>
       <td class="nav-cell">${r.prevVal.toFixed(decimals)}</td>
@@ -1023,6 +1032,11 @@ function renderSummary(rows, initialNav = 1, gridRatio = 0) {
     const cur = investedRows[investedRows.length - 1];
     if (prev.nav > 0) lastStepDD = (prev.nav - cur.nav) / prev.nav * 100;
   }
+  // 最终回撤修复收益率：末档净值涨回初始净值时的最终收益率 = (修复后市值 − 总投入) ÷ 总投入
+  // 修复后市值 = 当前价值 ÷ 末档相对净值（即 r.nav，与趋势图回撤修复收益率曲线的末值同口径）
+  const finalRecover = (last.totalInvest > 0 && last.nav > 0)
+    ? +((last.curVal / last.nav - last.totalInvest) / last.totalInvest * 100).toFixed(2)
+    : 0;
   document.getElementById('summary').innerHTML = `
     <div class="summary-item">
       <div class="label">账户资产</div>
@@ -1032,6 +1046,7 @@ function renderSummary(rows, initialNav = 1, gridRatio = 0) {
     <div class="summary-item">
       <div class="label">总亏损比率</div>
       <div class="value negative">${fmtPct(last.lossRate)}</div>
+      <div style="font-size:11px; color:#2ec4b6; margin-top:2px;">回撤修复收益率 ${finalRecover.toFixed(2)}%</div>
     </div>
     <div class="summary-item">
       <div class="label">首末档投入比</div>
@@ -1264,6 +1279,16 @@ const helpContent = {
         <li>复利模型：<code>回撤比例 = 1 − (1 − 网格比例)^档位</code></li>
       </ul>
       <div class="tip">这是"标的本身"的亏损口径，与你账户的实际亏损（总亏损比率）是两个不同的概念。</div>`
+  },
+  colStepDrop: {
+    title: '跌幅',
+    html: `
+      <p>本行相对上一行净值的单档下跌幅度：<code>跌幅 = (上一行净值 − 本行净值) ÷ 上一行净值</code>。</p>
+      <ul>
+        <li>第 0 档（初始建仓）没有上一行，显示 <code>-</code></li>
+        <li>计划内各档的跌幅恒等于<b>网格比例</b>（线性与复利模型均是），可用来核对表格数值</li>
+      </ul>
+      <div class="tip">"回撤比例"是相对顶点（净值 1）的累计下跌，"跌幅"是相对上一档的单步下跌，两者口径不同。</div>`
   },
   colRecoverGain: {
     title: '回撤修复涨幅',
