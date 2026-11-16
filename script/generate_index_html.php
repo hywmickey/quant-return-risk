@@ -105,7 +105,7 @@ foreach ($groups as $group_name => $items) {
     $lines[] = "    <h2>{$group_name}<span class=\"count\">(" . count($items) . ")</span></h2>";
     $lines[] = '    <ul>';
     foreach ($items as $item) {
-        $lines[] = "        <li><a href=\"./{$item['html']}\">{$item['title']}</a></li>";
+        $lines[] = "        <li><a href=\"./{$item['html']}\" target=\"_blank\" rel=\"noopener\">{$item['title']}</a></li>";
     }
     $lines[] = '    </ul>';
 }
