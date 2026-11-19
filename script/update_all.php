@@ -20,9 +20,10 @@
  *   php update_all.php --skip-portfolio       # 跳过投资组合回测与组合报告
  *   php update_all.php --skip-analyze         # 跳过回撤分析报告生成 + 跳过 index.html
  *   php update_all.php --skip-index-html      # 只跳过 index.html，回撤分析照常
+ *   php update_all.php --skip-trailing        # 跳过滚动收益率 HTML 生成
  *   php update_all.php --funds=008114,050025  # 只更新指定基金（逗号分隔代码）
- *   php update_all.php --only-analyze         # 只跑回撤分析 + index.html（不抓新数据）
- *   php update_all.php --only-drawdown        # 只跑 return_drawdown_analyze.php，不生成 index.html
+ *   php update_all.php --only-analyze         # 只跑回撤分析 + index.html + 滚动收益率（不抓新数据）
+ *   php update_all.php --only-drawdown        # 只跑 return_drawdown_analyze.php，不生成 index.html 和滚动收益率
  *   php update_all.php --full                 # 所有抓取脚本走全量重抓
  *   php update_all.php --dry-run              # 打印要执行的命令，不真正运行
  *   php update_all.php --verbose              # 显示子脚本的完整输出
@@ -44,8 +45,9 @@ function show_help(): void
   --skip-portfolio  跳过投资组合回测和组合回撤报告
   --skip-analyze    跳过回撤分析报告生成和 index.html
   --skip-index-html 只跳过 index.html，回撤分析照常
-  --only-analyze    只跑回撤分析 + index.html（不抓新数据）
-  --only-drawdown   只跑 return_drawdown_analyze.php（不抓新数据、不生成 index.html）
+  --skip-trailing   跳过滚动收益率 HTML 生成
+  --only-analyze    只跑回撤分析 + index.html + 滚动收益率（不抓新数据）
+  --only-drawdown   只跑 return_drawdown_analyze.php（不抓新数据、不生成 index.html 和滚动收益率）
   --funds=CODE1,CODE2  只更新指定基金（逗号分隔代码）
   --full            所有抓取脚本强制全量重抓
   --dry-run         打印命令但不真正执行，用于预览
@@ -53,12 +55,13 @@ function show_help(): void
   --help            显示本帮助
 
 执行流程：
-  步骤 1/6  指数抓取（FRED / Yahoo / MSCI）
-  步骤 2/6  基金原始净值抓取（天天基金）
-  步骤 3/6  基金数据转换为标准日线格式
-  步骤 4/6  投资组合回测（config.ini 中的 portfolio_* 组合）
-  步骤 5/6  生成回撤分析报告（自动发现 data/daily/ 与 data/portfolio/ 下的文件）
-  步骤 6/6  重新生成 html/index.html 索引页
+  步骤 1/7  指数抓取（FRED / Yahoo / MSCI）
+  步骤 2/7  基金原始净值抓取（天天基金）
+  步骤 3/7  基金数据转换为标准日线格式
+  步骤 4/7  投资组合回测（config.ini 中的 portfolio_* 组合）
+  步骤 5/7  生成回撤分析报告（自动发现 data/daily/ 与 data/portfolio/ 下的文件）
+  步骤 6/7  重新生成 html/index.html 索引页
+  步骤 7/7  生成滚动收益率 HTML（近 1/3/5 年曲线图）
 
 HELP;
 }
@@ -72,6 +75,7 @@ $opts = getopt('', [
     'skip-portfolio',
     'skip-analyze',
     'skip-index-html',
+    'skip-trailing',
     'only-analyze',
     'only-drawdown',
     'funds:',
@@ -103,6 +107,10 @@ $skip_funds      = isset($opts['skip-funds']) || isset($opts['only-analyze']) ||
 $skip_indexes    = isset($opts['skip-indexes']) || isset($opts['only-analyze']) || $only_drawdown;
 $skip_analyze    = isset($opts['skip-analyze']);
 $skip_index_html = $skip_analyze || isset($opts['skip-index-html']) || $only_drawdown;
+// 滚动收益率 HTML：默认跟着 skip-analyze / only-drawdown 一起跳过，
+// 但可以用 --skip-trailing 单独关闭、或用 --only-analyze 强制开启
+$skip_trailing_default = $skip_analyze || $only_drawdown;
+$skip_trailing         = isset($opts['skip-trailing']) ? true : $skip_trailing_default;
 // 只跑报告的两种模式都不重新回测组合，直接用 data/portfolio/ 下已有的净值 CSV
 $skip_portfolio_backtest = $skip_portfolio || isset($opts['only-analyze']) || $only_drawdown;
 $dry_run         = isset($opts['dry-run']);
@@ -300,11 +308,74 @@ if (!$skip_analyze) {
 }
 
 // ---------------------------------------------------------------------------
-// Step 6: 重新生成 html/index.html 索引页
+// Step 7: 生成滚动收益率 HTML（近 1 / 3 / 5 年曲线图）
 // ---------------------------------------------------------------------------
-if (!$skip_index_html) {
-    $arg_dry = $dry_run ? ' --dry-run' : '';
-    $exit_code |= $run('generate_index_html.php', $arg_dry, '重生成 html/index.html 索引页');
+if (!$skip_trailing) {
+    echo "\n" . str_repeat('=', 50) . "\n";
+    echo "步骤 7/7: 生成滚动收益率 HTML\n";
+    echo str_repeat('=', 50);
+
+    // 和 Step 5 共用同一批 *_daily.csv 文件
+    $trailing_csvs = $csv_files ?? [];
+    if ($trailing_csvs === []) {
+        // Step 5 里如果没跑（--skip-analyze），这里自己找一次
+        $trailing_csvs = glob($daily_dir . '/*.csv');
+        if ($trailing_csvs === false) {
+            $trailing_csvs = [];
+        }
+        $trailing_csvs = array_values(array_filter(
+            $trailing_csvs,
+            fn(string $path): bool => preg_match('/_daily\.csv$/i', basename($path)) === 1
+        ));
+    }
+
+    if (empty($trailing_csvs)) {
+        echo "\n  ! 未找到 {$daily_dir}/*_daily.csv，跳过滚动收益率生成\n";
+    } else {
+        foreach ($trailing_csvs as $csv_path) {
+            $filename = basename($csv_path);
+
+            $title = $titles_indexes[$filename] ?? '';
+            if ($title === '' && preg_match('/^fund_(\d+)_daily\.csv$/', $filename, $m)) {
+                $code  = $m[1];
+                $title = $titles_funds[$code] ?? "基金 {$code}";
+            }
+            if ($title === '') {
+                $title = $filename;
+            }
+
+            $title_arg = escapeshellarg($title);
+            $exit_code |= $run(
+                'generate_trailing_return_html.php',
+                "--in={$filename} --title={$title_arg}",
+                "滚动收益率: {$title}"
+            );
+        }
+    }
+
+    // 投资组合也生成滚动收益率（复用 Step 5 里已有的组合文件发现逻辑）
+    if (!$skip_portfolio) {
+        $portfolio_files = $portfolio_files ?? null;
+        if ($portfolio_files === null) {
+            $portfolio_files = glob($portfolio_dir . '/portfolio_*_daily.csv') ?: [];
+        }
+
+        if ($portfolio_files !== []) {
+            $portfolios = quant_portfolios();
+            foreach ($portfolio_files as $csv_path) {
+                $filename = basename($csv_path);
+                $key   = preg_replace('/^portfolio_|_daily\.csv$/', '', $filename);
+                $title = $portfolios[$key]['name'] ?? "投资组合 {$key}";
+
+                $title_arg = escapeshellarg($title);
+                $exit_code |= $run(
+                    'generate_trailing_return_html.php',
+                    '--in=' . escapeshellarg($csv_path) . " --title={$title_arg}",
+                    "滚动收益率: {$title}"
+                );
+            }
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
