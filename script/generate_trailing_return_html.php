@@ -1,12 +1,13 @@
 <?php
 /**
- * 生成滚动收益率（近 1 年 / 3 年 / 5 年）曲线图的 HTML
+ * 生成滚动收益率（近 1 / 2 / 3 / 4 / 5 年）曲线图的 HTML
  *
  * 输入：data/daily/*.csv （列：date, level, change_pct，升序）
  * 输出：html/{数据源}_trailing_return.html
  *
  * 对数据区间内每个交易日 d，往前找「d 当天往前推 N 年」之前最近的一个交易日 b，
- * 收益率 = level(d) / level(b) - 1。三条曲线分别是 N = 1 / 3 / 5 年。
+ * 收益率 = level(d) / level(b) - 1。默认含近 1 / 2 / 3 / 4 / 5 年五条曲线，
+ * 数据区间不足某个跨度时自动跳过该曲线。
  * （1 年按 365.25 自然日折算，计入闰年；数据不足 N 年则该曲线从可算出的最早日期起画）
  *
  * 用法：
@@ -92,7 +93,7 @@ $opts = getopt('', ['in::', 'title::', 'html-out::', 'help']);
 
 if (isset($opts['help'])) {
     echo "用法：php generate_trailing_return_html.php [--in=xxx.csv] [--title=显示名]\n";
-    echo "  生成滚动收益率（近 1/3/5 年）曲线图 HTML\n";
+    echo "  生成滚动收益率（近 1/2/3/4/5 年）曲线图 HTML\n";
     echo "  输入未带路径时按 config.ini 的 daily 目录查找，默认 fund_160213_daily.csv\n";
     echo "  输出默认：html/{数据源}_trailing_return.html\n";
     exit(0);
@@ -194,22 +195,44 @@ function compute_trailing_returns(array $data, float $years): array
 
 $series = array(
     '1Y' => compute_trailing_returns($index_data, 1.0),
+    '2Y' => compute_trailing_returns($index_data, 2.0),
     '3Y' => compute_trailing_returns($index_data, 3.0),
+    '4Y' => compute_trailing_returns($index_data, 4.0),
     '5Y' => compute_trailing_returns($index_data, 5.0),
 );
 
 // 图例颜色（与项目里其他图保持一致的高对比配色）
 $colors = array(
     '1Y' => '#1a73e8',
+    '2Y' => '#d93025',
     '3Y' => '#34a853',
+    '4Y' => '#9334e6',
     '5Y' => '#fbbc04',
 );
 
 $labels = array(
     '1Y' => '近 1 年',
+    '2Y' => '近 2 年',
     '3Y' => '近 3 年',
+    '4Y' => '近 4 年',
     '5Y' => '近 5 年',
 );
+
+// 绘制顺序：5Y 在最下层，1Y 在最上层
+$draw_order = array('5Y', '4Y', '3Y', '2Y', '1Y');
+// 数据区间不足某个跨度时，该曲线为空，自动跳过；一条都没有说明数据不足 1 年
+$active_keys = array_values(array_filter($draw_order, fn(string $k): bool => !empty($series[$k])));
+if ($active_keys === []) {
+    fwrite(STDERR, "数据区间不足 1 年，无法绘制滚动收益率曲线\n");
+    exit(1);
+}
+if (empty($series['5Y'])) {
+    fwrite(STDERR, "提示：数据区间不足 5 年，仅绘制可用的近 N 年曲线\n");
+}
+// 页面标题里显示的跨度，如 "1 / 3"
+$window_desc = implode(' / ', array_map(fn(string $k): string => substr($k, 0, 1), array_reverse($active_keys)));
+// 默认隐藏的曲线（近 2 年和近 4 年），点击图例后再显示
+$default_hidden = array_values(array_intersect(array('2Y', '4Y'), $active_keys));
 
 // ------ 找出三条曲线的公共区间端点 ------
 // 每条曲线的起点都不同（跨度越大起点越晚），画折线时各自从自己的起点开始
@@ -220,11 +243,7 @@ foreach ($series as $series_data) {
         $plot_start = min($plot_start, $series_data[0]['date']);
     }
 }
-// 至少要有 5Y 曲线才能画，否则说明数据不足 5 年
-if ($series['5Y'] === []) {
-    fwrite(STDERR, "数据区间不足 5 年，无法绘制近 5 年收益率曲线\n");
-    exit(1);
-}
+// 数据不足 5 年时上面已给出提示，这里只保证至少有一条曲线可画（见 $active_keys）
 
 // ------ Y 轴范围：所有曲线的收益率 min/max，并且 0% 必须在刻度范围内 ------
 $y_min = PHP_FLOAT_MAX;
@@ -367,7 +386,7 @@ function build_polyline_points(array $series_data, callable $to_x, callable $to_
 
 // ------ 组装 SVG ------
 $svg  = '<svg class="chart" viewBox="0 0 ' . $svg_w . ' ' . $svg_h . '" role="img"'
-    . ' aria-label="滚动收益率（近 1 / 3 / 5 年）折线图"' . "\n";
+    . ' aria-label="滚动收益率（近 ' . $window_desc . ' 年）折线图"' . "\n";
 $svg .= '  xmlns="http://www.w3.org/2000/svg">' . "\n";
 
 // 背景网格
@@ -426,33 +445,37 @@ $svg .= '  <text x="16" y="' . ($pad_t + $plot_h / 2) . '" text-anchor="middle"'
     . ' font-size="15" fill="#333"'
     . ' transform="rotate(-90 16 ' . ($pad_t + $plot_h / 2) . ')">收益率(%)</text>' . "\n";
 
-// 三条折线（5Y 在最下层，1Y 在最上层，避免高频曲线被挡住）
-$draw_order = array('5Y', '3Y', '1Y');
-foreach ($draw_order as $key) {
+// 折线（5Y 在最下层，1Y 在最上层，避免高频曲线被挡住；只画有数据的跨度）
+foreach ($active_keys as $key) {
     $points = build_polyline_points($series[$key], $to_x, $to_y);
+    $hidden_style = in_array($key, $default_hidden, true) ? ' style="display:none"' : '';
     $svg .= '  <polyline fill="none" stroke="' . $colors[$key] . '" stroke-width="1.8"'
         . ' stroke-linejoin="round" stroke-linecap="round"'
-        . ' data-series="' . $key . '" points="' . $points . '"/>' . "\n";
+        . ' data-series="' . $key . '"' . $hidden_style . ' points="' . $points . '"/>' . "\n";
 }
 
 // 最右端加图例（颜色方块 + 文字）
 $legend_x_start = $pad_l + 12;
 $legend_y       = $pad_t + 14;
-$gap_between    = 275;
-foreach ($draw_order as $i => $key) {
+$gap_between    = 170;
+foreach (array_reverse($active_keys) as $i => $key) {
     $lx = $legend_x_start + $i * $gap_between;
-    $svg .= '  <rect x="' . $lx . '" y="' . ($legend_y - 10) . '" width="14" height="14"'
+    // 图例可点击：点击切换该曲线的显示/隐藏；默认隐藏的图例初始半透明
+    $hidden_legend = in_array($key, $default_hidden, true) ? ' opacity="0.35"' : '';
+    $svg .= '  <g class="legend-item" data-legend="' . $key . '" style="cursor:pointer"' . $hidden_legend . '>' . "\n";
+    $svg .= '    <rect x="' . $lx . '" y="' . ($legend_y - 10) . '" width="14" height="14"'
         . ' fill="' . $colors[$key] . '"/>' . "\n";
-    $svg .= '  <text x="' . ($lx + 20) . '" y="' . ($legend_y + 1) . '" font-size="14" fill="#333">'
+    $svg .= '    <text x="' . ($lx + 20) . '" y="' . ($legend_y + 1) . '" font-size="14" fill="#333">'
         . $labels[$key] . '</text>' . "\n";
+    $svg .= '  </g>' . "\n";
 }
 
 // 悬停竖线 + tooltip 容器（JS 控制显示与定位）
 $svg .= '  <line id="hover-line" x1="0" y1="' . $pad_t . '" x2="0" y2="' . ($pad_t + $plot_h) . '"'
     . ' stroke="#333" stroke-dasharray="3,3" style="display:none"/>' . "\n";
 $svg .= '  <g id="hover-dots" style="display:none">' . "\n";
-// 三个悬停圆点，颜色分别对应三条曲线
-foreach ($draw_order as $key) {
+// 每个有数据的跨度一个悬停圆点，颜色对应各自的曲线
+foreach ($active_keys as $key) {
     $svg .= '    <circle id="hover-dot-' . $key . '" r="4.5" fill="#fff"'
         . ' stroke="' . $colors[$key] . '" stroke-width="2"'
         . ' style="display:none"/>' . "\n";
@@ -465,9 +488,9 @@ $span_years  = (strtotime($last_date) - strtotime($first_date)) / 86400 / 365.25
 $first_point = $index_data[0];
 $last_point  = $index_data[count($index_data) - 1];
 
-// 三条曲线各自最新的收益率（用于页脚 summary）
+// 各条曲线最新的收益率（用于页脚 summary）
 $latest_rates = array();
-foreach ($draw_order as $key) {
+foreach ($active_keys as $key) {
     $s = $series[$key];
     $latest_rates[$key] = $s !== [] ? $s[count($s) - 1]['pct'] : null;
 }
@@ -508,12 +531,12 @@ $html .= ".range-bar .range-presets button.active{background:#1a73e8;color:#fff;
 $html .= ".range-bar .range-info{font-size:12px;color:#666}\n";
 $html .= "</style>\n</head>\n<body>\n";
 
-$html .= '<h1>' . htmlspecialchars($index_label . ' 滚动收益率（近 1 / 3 / 5 年）', ENT_QUOTES) . "</h1>\n";
+$html .= '<h1>' . htmlspecialchars($index_label . ' 滚动收益率（近 ' . $window_desc . ' 年）', ENT_QUOTES) . "</h1>\n";
 $html .= '<div class="meta">数据区间：' . htmlspecialchars($first_date . ' ~ ' . $last_date, ENT_QUOTES)
     . '（' . number_format($span_years, 2, '.', '') . ' 年，' . count($index_data) . " 个交易日）</div>\n";
 $html .= '<div class="summary">';
 $html .= '<span>当前净值/点位 <b>' . number_format($last_point['level'], 4, '.', '') . '</b></span>';
-foreach ($draw_order as $key) {
+foreach ($active_keys as $key) {
     $val = $latest_rates[$key];
     if ($val === null) {
         $html .= '<span>近 ' . substr($key, 0, 1) . ' 年 <b>—</b></span>';
@@ -552,20 +575,21 @@ $html .= '  <div class="tooltip" id="tooltip"></div>' . "\n";
 $html .= $svg . "\n";
 $html .= "</div>\n";
 
-$html .= "<p class=\"meta\">鼠标悬停在图上可查看该日三条曲线的收益率与各自的基准日期。"
+$html .= "<p class=\"meta\">鼠标悬停在图上可查看该日各条曲线的收益率与各自的基准日期；点击图例可显示/隐藏对应曲线。"
     . "收益率 = 当日净值 / 往前推 N 年最近交易日净值 − 1。</p>\n";
 
 // ------ 悬停交互 JS ------
 $html .= "<script>\n";
-// 把三条曲线的数据点作为 JSON 嵌入，避免 JS 里再去解析 polyline 字符串
+// 把各条曲线的数据点作为 JSON 嵌入，避免 JS 里再去解析 polyline 字符串
 $html .= "const seriesData = {\n";
-foreach ($draw_order as $key) {
+foreach ($active_keys as $key) {
     $series_data = $series[$key];
     $html .= "  '{$key}': " . json_encode($series_data, JSON_UNESCAPED_UNICODE) . ",\n";
 }
 $html .= "};\n";
 $html .= "const colors = " . json_encode($colors, JSON_UNESCAPED_UNICODE) . ";\n";
 $html .= "const labels = " . json_encode($labels, JSON_UNESCAPED_UNICODE) . ";\n";
+$html .= "const DEFAULT_HIDDEN = " . json_encode($default_hidden) . ";\n";
 
 // PHP 注入静态常量：完整数据范围的起点/终点、Y 轴全范围
 $html .= "const FULL_START = '{$all_series_start}';\n";
@@ -604,6 +628,8 @@ function svg_point_from_event(evt) {
 
 // ------ 视图状态 ------
 let viewRange = { start: FULL_START, end: FULL_END };
+// 被图例点击隐藏的曲线（默认隐藏近 2 年和近 4 年）
+const hiddenSeries = new Set(DEFAULT_HIDDEN);
 
 // 当前视图的换算参数（rebuildChart 更新这些）
 let gYMin, gYMax, gStartSec, gEndSec;
@@ -770,10 +796,13 @@ function rebuildChart() {
         });
     }
 
-    // 2. 计算新的 Y min/max
+    // 2. 计算新的 Y min/max（只用当前显示的曲线；全部隐藏时退回全部曲线）
     let allFiltered = [];
     for (const key of Object.keys(filtered)) {
-        allFiltered = allFiltered.concat(filtered[key]);
+        if (!hiddenSeries.has(key)) allFiltered = allFiltered.concat(filtered[key]);
+    }
+    if (allFiltered.length === 0) {
+        for (const key of Object.keys(filtered)) allFiltered = allFiltered.concat(filtered[key]);
     }
     const [nyMin, nyMax] = nice_y_extent(allFiltered);
     gYMin = nyMin;
@@ -781,9 +810,15 @@ function rebuildChart() {
     gStartSec = new Date(viewRange.start + 'T00:00:00Z').getTime() / 1000;
     gEndSec   = new Date(viewRange.end   + 'T00:00:00Z').getTime() / 1000;
 
-    // 3. 更新 polylines 的 points
+    // 3. 更新 polylines 的 points（被隐藏的曲线同时隐藏）
     document.querySelectorAll('polyline[data-series]').forEach(pl => {
         const key = pl.getAttribute('data-series');
+        if (hiddenSeries.has(key)) {
+            pl.style.display = 'none';
+            pl.setAttribute('points', '');
+            return;
+        }
+        pl.style.display = '';
         const pts = filtered[key];
         const parts = pts.map(pt => compute_svg_x(pt.date) + ',' + compute_svg_y(pt.pct * 100));
         pl.setAttribute('points', parts.join(' '));
@@ -931,6 +966,23 @@ document.getElementById('range-apply').addEventListener('click', () => {
     rebuildChart();
 });
 
+// ------ 图例点击：显示/隐藏对应曲线 ------
+svg.querySelectorAll('.legend-item').forEach(g => {
+    // 默认隐藏的曲线，图例初始就是半透明状态
+    if (hiddenSeries.has(g.getAttribute('data-legend'))) g.style.opacity = '0.35';
+    g.addEventListener('click', () => {
+        const key = g.getAttribute('data-legend');
+        if (hiddenSeries.has(key)) {
+            hiddenSeries.delete(key);
+            g.style.opacity = '1';
+        } else {
+            hiddenSeries.add(key);
+            g.style.opacity = '0.35';
+        }
+        rebuildChart();
+    });
+});
+
 // ------ 悬停交互 ------
 svg.addEventListener('mousemove', function (evt) {
     const p = svg_point_from_event(evt);
@@ -954,8 +1006,9 @@ svg.addEventListener('mousemove', function (evt) {
 
     let tipHtml = '<div class="date">' + targetDate + '</div>';
     for (const key of Object.keys(seriesData)) {
-        const nearest = find_nearest_date(seriesData[key], targetDate);
         const dot = document.getElementById('hover-dot-' + key);
+        // 被图例隐藏的曲线不参与提示框
+        const nearest = hiddenSeries.has(key) ? null : find_nearest_date(seriesData[key], targetDate);
         if (!nearest) {
             // 该日期还没有这条曲线的数据（如近 5 年曲线尚未开始）：
             // 提示框里不显示这一行，同时隐藏上一次移动留下的圆点
@@ -1018,13 +1071,13 @@ if ($written === false) {
 printf("数据源       : %s\n", $in_file);
 printf("标题         : %s\n", $index_label);
 printf("数据区间     : %s ~ %s（%.2f 年，%d 天）\n", $first_date, $last_date, $span_years, count($index_data));
-foreach ($draw_order as $key) {
+foreach ($active_keys as $key) {
     $s = $series[$key];
     $start = $s !== [] ? $s[0]['date'] : '—';
     $cnt   = count($s);
     $latest = $latest_rates[$key];
     $latestStr = $latest === null ? '—' : number_format($latest * 100, 2, '.', '') . '%';
-    printf("  近 %s 年曲线: %d 点起于 %s，最新 %s\n", $key, $cnt, $start, $latestStr);
+    printf("  近 %s 年曲线: %d 点起于 %s，最新 %s\n", substr($key, 0, 1), $cnt, $start, $latestStr);
 }
 printf("输出文件     : %s（%d bytes）\n", $html_file, $written);
 

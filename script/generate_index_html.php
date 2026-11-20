@@ -2,9 +2,11 @@
 /**
  * 生成 html/index.html 索引页
  *
- * 自动扫描 html/*_drawdown_top.html，按数据源类型（指数 / 基金）分组，
+ * 自动扫描 html/*_drawdown_top.html 与 html/*_trailing_return.html，
+ * 按数据源类型（指数 / 基金）分组，
  * 用 config.php 中 titles.funds / titles.indexes 推中文标题，
- * 输出一个纯静态的 HTML 索引页。
+ * 输出一个纯静态的 HTML 索引页：同一数据源一行，回撤报告为主链接，
+ * 旁边附"滚动收益率"副链接（存在时）。
  *
  * 用法：
  *   php generate_index_html.php                  # 正式生成
@@ -35,20 +37,34 @@ $html_files = glob($html_dir . '/*_drawdown_top.html');
 if ($html_files === false) {
     $html_files = [];
 }
+// generate_trailing_return_html.php 产出的滚动收益率报告
+$trailing_files = glob($html_dir . '/*_trailing_return.html');
+if ($trailing_files === false) {
+    $trailing_files = [];
+}
 
-if (empty($html_files)) {
-    fwrite(STDERR, "未找到 {$html_dir}/*_drawdown_top.html，跳过 index.html\n");
+if (empty($html_files) && empty($trailing_files)) {
+    fwrite(STDERR, "未找到 {$html_dir}/*_drawdown_top.html 或 *_trailing_return.html，跳过 index.html\n");
     exit(0);
+}
+
+// 先把两类报告按原始 CSV 名合并，同一个数据源只占索引里的一行
+$reports = [];
+foreach ($html_files as $html_path) {
+    $html_name = basename($html_path);   // e.g. "sp500_daily_drawdown_top.html"
+    $csv_name  = preg_replace('/_drawdown_top\.html$/', '.csv', $html_name);
+    $reports[$csv_name]['drawdown'] = $html_name;
+}
+foreach ($trailing_files as $html_path) {
+    $html_name = basename($html_path);   // e.g. "sp500_daily_trailing_return.html"
+    $csv_name  = preg_replace('/_trailing_return\.html$/', '.csv', $html_name);
+    $reports[$csv_name]['trailing'] = $html_name;
 }
 
 // 按数据源类型分组：指数 vs 基金
 $groups = ['指数' => [], '基金' => [], '其他' => []];
 
-foreach ($html_files as $html_path) {
-    $html_name = basename($html_path);   // e.g. "sp500_daily_drawdown_top.html"
-    // 推回原始 CSV 名：去掉 _drawdown_top.html
-    $csv_name = preg_replace('/_drawdown_top\.html$/', '.csv', $html_name);
-
+foreach ($reports as $csv_name => $files) {
     // 用 update_all.php Step 4 相同的匹配逻辑推标题
     $title = $titles_indexes[$csv_name] ?? '';
     if ($title === '' && preg_match('/^fund_(\d+)_daily\.csv$/', $csv_name, $m)) {
@@ -59,11 +75,18 @@ foreach ($html_files as $html_path) {
         $title = $csv_name;
     }
 
+    $item = [
+        'title'    => $title,
+        'key'      => $csv_name,
+        'drawdown' => $files['drawdown'] ?? '',
+        'trailing' => $files['trailing'] ?? '',
+    ];
+
     // 按类型分桶
     if (str_starts_with($csv_name, 'fund_')) {
-        $groups['基金'][] = ['html' => $html_name, 'title' => $title, 'key' => $csv_name];
+        $groups['基金'][] = $item;
     } else {
-        $groups['指数'][] = ['html' => $html_name, 'title' => $title, 'key' => $csv_name];
+        $groups['指数'][] = $item;
     }
 }
 
@@ -91,11 +114,13 @@ $lines = [
     '        a    { color: #1a73e8; text-decoration: none; }',
     '        a:hover { text-decoration: underline; }',
     '        .count { color: #888; font-size: 12px; font-weight: normal; margin-left: 8px; }',
+    '        .sub { margin-left: 10px; font-size: 12px; }',
+    '        .sub a { color: #5f6368; }',
     '    </style>',
     '</head>',
     '<body>',
     '    <h1>回撤分析报告索引</h1>',
-    "    <div class=\"meta\">共 " . count($html_files) . " 份报告 · 更新日期 {$today}</div>",
+    "    <div class=\"meta\">共 " . count($reports) . " 个数据源 · " . count($html_files) . " 份回撤报告 · " . count($trailing_files) . " 份滚动收益率报告 · 更新日期 {$today}</div>",
 ];
 
 foreach ($groups as $group_name => $items) {
@@ -105,7 +130,13 @@ foreach ($groups as $group_name => $items) {
     $lines[] = "    <h2>{$group_name}<span class=\"count\">(" . count($items) . ")</span></h2>";
     $lines[] = '    <ul>';
     foreach ($items as $item) {
-        $lines[] = "        <li><a href=\"./{$item['html']}\" target=\"_blank\" rel=\"noopener\">{$item['title']}</a></li>";
+        // 主链接优先指向回撤报告；只有滚动收益率报告时主链接指向它
+        $main_html = $item['drawdown'] !== '' ? $item['drawdown'] : $item['trailing'];
+        $line = "        <li><a href=\"./{$main_html}\" target=\"_blank\" rel=\"noopener\">{$item['title']}</a>";
+        if ($item['drawdown'] !== '' && $item['trailing'] !== '') {
+            $line .= "<span class=\"sub\"><a href=\"./{$item['trailing']}\" target=\"_blank\" rel=\"noopener\">滚动收益率</a></span>";
+        }
+        $lines[] = $line . '</li>';
     }
     $lines[] = '    </ul>';
 }
@@ -114,7 +145,7 @@ $lines[] = '</body>';
 $lines[] = '</html>';
 
 $index_path = $html_dir . '/index.html';
-echo "生成 index.html (" . count($html_files) . " 份报告)\n";
+echo "生成 index.html (" . count($html_files) . " 份回撤报告 + " . count($trailing_files) . " 份滚动收益率报告)\n";
 echo "输出: {$index_path}\n";
 
 if ($dry_run) {
