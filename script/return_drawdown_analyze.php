@@ -396,8 +396,10 @@ foreach ($index_data as $order => $date_value) {
                 $max_high_point_index = -1;   // 最大高点索引
                 $max_high_point_last  = 0;    // 最大高点的点位
                 for ($i = $dropdown_high_point_index; $i < count($dropdown_records); $i++) {
-                    // 如果之前回撤的高点和低点都高于当前的高点和低点，且是最大高点，则可以合并
-                    if ($dropdown_records[$i]['high_level'] > $high_point['level'] && $dropdown_records[$i]['low_level'] > $low_point['level']) {
+                    // 如果之前回撤的高点和低点都高于当前的高点和低点，且是最大高点，则可以合并。
+                    // 高点比较用 >=：合并后 $high_point 会被置为这条记录自己的高点，若再用 >，
+                    // 同一轮回撤后续再创新低时就再也合并不进来，date_end / low_level 会停在第一次的低点。
+                    if ($dropdown_records[$i]['high_level'] >= $high_point['level'] && $dropdown_records[$i]['low_level'] > $low_point['level']) {
                         // 该记录的高点必须是 [它的起点, 当前交易日] 区间里的最高点位，否则合并出来的回撤
                         // 会把中途涨得更高的那段行情吞进去，导致 high_level 不是区间真正的高点
                         if ($dropdown_records[$i]['high_level'] < $window_max($dropdown_records[$i]['start_index']) - 1e-9) {
@@ -430,6 +432,25 @@ foreach ($index_data as $order => $date_value) {
         if ($low_point['level'] == $date_value['level']) {
             $low_point['date'] = $date_value['date'];
         }
+    }
+}
+
+// 数据末尾如果仍处在回撤中（高点之后还没涨回高点），把这段未走完的回撤也补进记录。
+// 否则最后一个 low_level 会停在上一个已完成的低点，看起来像数据没更新。
+if ($high_point['date'] !== $low_point['date'] && $high_point['level'] > $low_point['level']) {
+    $dropdown_info = array(
+        'date_start'  => $high_point['date'],
+        'high_level'  => $high_point['level'],
+        'date_end'    => $low_point['date'],
+        'low_level'   => $low_point['level'],
+        'start_index' => $high_point['index'],
+    );
+    $last_index = count($dropdown_records) - 1;
+    // 和最后一条记录同起点时以当前低点为准（是在同一次回撤里继续创新低）
+    if ($last_index >= 0 && $dropdown_records[$last_index]['date_start'] === $dropdown_info['date_start']) {
+        $dropdown_records[$last_index] = $dropdown_info;
+    } else {
+        $dropdown_records[] = $dropdown_info;
     }
 }
 
