@@ -19,6 +19,15 @@
  *   再按日期合并写回（重叠区间以新数据为准，用于吸收数据源对近几日点位的修订）。
  *   适合挂 crontab 每日跑一次。
  *
+ * 补充源（FRED 滞后时自动回落）：
+ *   FRED 对 Nasdaq 自有指数转载较慢（常落后 2~5 个交易日），而本地文件又已与 FRED 对齐，
+ *   因此会出现「脚本执行成功但没有最新数据」的现象。若 FRED 返回的最后日期仍早于 --end，
+ *   则按下列映射回落官方源补齐缺失交易日：
+ *     NASDAQ100      -> api.nasdaq.com 行情接口（NDX）
+ *     NASDAQNDXTMC   -> indexes.nasdaqomx.com 历史导出（NDXTMC）
+ *     NASDAQNDXTMCTR -> indexes.nasdaqomx.com 历史导出（NDXTMCTR）
+ *   只补 FRED 尚缺的日期，重叠日期仍以 FRED 为准；可用 --no-fallback 关闭。
+ *
  * 用法：
  *   php fetch_us_indexes.php                                  # 增量更新全部指数
  *   php fetch_us_indexes.php --series=SP500                   # 只更新指定指数，逗号分隔可多个
@@ -34,6 +43,7 @@
  *   --end       结束日期 YYYY-MM-DD，默认今天
  *   --overlap   增量时向前回溯的天数，默认 5
  *   --api-key   FRED api_key，默认用脚本内置 key 或环境变量 FRED_API_KEY
+ *   --no-fallback  关闭 FRED 滞后时的 Nasdaq 官方接口补充
  *   --help      帮助
  */
 
@@ -41,6 +51,12 @@ class FredIndexFetcher
 {
     /** FRED 序列观测值接口 */
     private const API_URL = 'https://api.stlouisfed.org/fred/series/observations';
+
+    /** Nasdaq 官方行情接口（FRED 滞后时，用于 NDX 等可查询到的指数） */
+    private const NASDAQ_URL = 'https://api.nasdaq.com/api';
+
+    /** Nasdaq 全球指数（GIW）历史数据导出接口（返回 xlsx） */
+    private const GIW_EXPORT_URL = 'https://indexes.nasdaqomx.com/Index/ExportHistory/';
 
     /** series_id => 本地 CSV 文件名（相对 data/daily 目录） */
     public const SERIES_FILES = [
@@ -58,6 +74,23 @@ class FredIndexFetcher
         'NASDAQ100'      => '2000-01-01',
         'NASDAQNDXTMC'   => '2022-03-21',   // NDXTMC 指数发布日（base value 1000）
         'NASDAQNDXTMCTR' => '2022-03-21',
+    ];
+
+    /**
+     * series_id => Nasdaq 官方接口的指数代码（FRED 滞后时用于补齐最新交易日的补充源）
+     * 仅收录 Nasdaq 官方行情接口确实提供历史日线的代码。
+     */
+    public const SERIES_NASDAQ = [
+        'NASDAQ100' => 'NDX',
+    ];
+
+    /**
+     * series_id => Nasdaq 全球指数（indexes.nasdaqomx.com）代码
+     * 这些指数在 api.nasdaq.com 查不到，改用 GIW 的历史数据导出（xlsx）
+     */
+    public const SERIES_GIW = [
+        'NASDAQNDXTMC'   => 'NDXTMC',
+        'NASDAQNDXTMCTR' => 'NDXTMCTR',
     ];
 
     /** @var string FRED api_key */
@@ -121,9 +154,134 @@ class FredIndexFetcher
     }
 
     /**
-     * 带重试的 HTTP GET
+     * 从 Nasdaq 官方接口抓取指定指数在 [$startDate, $endDate] 的日线收盘价
+     *
+     * 用于 FRED 转载滞后时补齐最近几个交易日；返回格式与 fetch() 一致。
+     * 接口返回 {"data":{"tradesTable":{"rows":[{"date":"11/23/2026","close":"26,746.10"}, ...]}}}
+     *
+     * @return array<int, array{date: string, level: float}> 按日期升序
      */
-    private function httpGet(string $url): string
+    public function fetchNasdaq(string $symbol, string $startDate, string $endDate): array
+    {
+        $query = http_build_query([
+            'assetclass' => 'index',
+            'fromdate'   => $startDate,
+            'todate'     => $endDate,
+            'limit'      => 250,
+        ]);
+
+        $raw = $this->httpGet(
+            self::NASDAQ_URL . '/quote/' . rawurlencode($symbol) . '/historical?' . $query,
+            ['Accept: application/json, text/plain, */*', 'Origin: https://www.nasdaq.com', 'Referer: https://www.nasdaq.com/'],
+            'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36'
+        );
+
+        $payload = json_decode($raw, true);
+        $rows    = $payload['data']['tradesTable']['rows'] ?? null;
+        if (!is_array($rows)) {
+            $message = $payload['status']['bCodeMessage'][0]['errorMessage'] ?? '返回格式异常';
+            throw new RuntimeException('Nasdaq 接口报错：' . $message);
+        }
+
+        $out = [];
+        foreach ($rows as $item) {
+            $date  = (string) ($item['date'] ?? '');
+            $close = str_replace([',', '$', ' '], '', (string) ($item['close'] ?? ''));
+            // Nasdaq 日期是 m/d/Y，转成与 CSV 一致的 Y-m-d
+            if (!preg_match('#^(\d{1,2})/(\d{1,2})/(\d{4})$#', $date, $m) || !is_numeric($close)) {
+                continue;
+            }
+            $out[] = [
+                'date'  => sprintf('%04d-%02d-%02d', (int) $m[3], (int) $m[1], (int) $m[2]),
+                'level' => (float) $close,
+            ];
+        }
+
+        usort($out, fn(array $a, array $b): int => strcmp($a['date'], $b['date']));
+
+        return $out;
+    }
+
+    /**
+     * 从 Nasdaq 全球指数站点（GIW）导出接口抓取日线收盘点位
+     *
+     * 该接口只提供 xlsx 导出：
+     *   https://indexes.nasdaqomx.com/Index/ExportHistory/NDXTMCTR?startDate=...&endDate=...&timeOfDay=Close
+     * 表格列：Trade Date（Excel 序列号）、Index Value、Net Change、High、Low。
+     * 当日尚未收盘时会出现一行点位为 0 的占位记录，需要跳过。
+     *
+     * @return array<int, array{date: string, level: float}> 按日期升序
+     */
+    public function fetchGiw(string $symbol, string $startDate, string $endDate): array
+    {
+        $url = self::GIW_EXPORT_URL . rawurlencode($symbol) . '?' . http_build_query([
+            'startDate' => $startDate,
+            'endDate'   => $endDate,
+            'timeOfDay' => 'Close',
+        ]);
+
+        $bin = $this->httpGet($url, ['Accept: */*'], 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36');
+
+        // ZipArchive 只能按路径打开，先落临时文件
+        $tmp = tempnam(sys_get_temp_dir(), 'giw_');
+        if ($tmp === false || file_put_contents($tmp, $bin) === false) {
+            throw new RuntimeException('GIW 导出内容写入临时文件失败');
+        }
+
+        $zip = new ZipArchive();
+        if ($zip->open($tmp) !== true) {
+            @unlink($tmp);
+            throw new RuntimeException('GIW 导出内容不是合法的 xlsx（可能是接口异常页）');
+        }
+        $sheet = $zip->getFromName('xl/worksheets/sheet1.xml');
+        $zip->close();
+        @unlink($tmp);
+
+        if ($sheet === false) {
+            throw new RuntimeException('GIW 导出文件中没有 sheet1');
+        }
+
+        // 逐行解析 A 列（交易日期序列号）与 B 列（Index Value）
+        preg_match_all('#<row[^>]*>(.*?)</row>#s', $sheet, $rowMatches);
+        $out = [];
+        foreach ($rowMatches[1] as $rowXml) {
+            preg_match_all('#<c r="([A-Z]+)\d+"([^>]*)>(.*?)</c>#s', $rowXml, $cells, PREG_SET_ORDER);
+            $serial = $value = null;
+            foreach ($cells as $cell) {
+                // 表头单元格是共享字符串（t="s"），跳过
+                if (strpos($cell[2], 't="s"') !== false) {
+                    continue;
+                }
+                if (!preg_match('#<v>([^<]*)</v>#', $cell[3], $v) || !is_numeric($v[1])) {
+                    continue;
+                }
+                if ($cell[1] === 'A') {
+                    $serial = (int) $v[1];
+                } elseif ($cell[1] === 'B') {
+                    $value = (float) $v[1];
+                }
+            }
+            // 序列号 < 20000 说明不是有效日期（如 1899 年的表头占位），点位 <= 0 是当日未收盘占位
+            if ($serial === null || $value === null || $serial < 20000 || $value <= 0) {
+                continue;
+            }
+            $out[] = [
+                'date'  => (new DateTimeImmutable('1899-12-30'))->modify("+{$serial} days")->format('Y-m-d'),
+                'level' => $value,
+            ];
+        }
+
+        usort($out, fn(array $a, array $b): int => strcmp($a['date'], $b['date']));
+
+        return $out;
+    }
+
+    /**
+     * 带重试的 HTTP GET
+     *
+     * @param array<int, string> $headers 额外的请求头（默认只发 Accept: application/json）
+     */
+    private function httpGet(string $url, array $headers = [], ?string $userAgent = null): string
     {
         $lastError = '';
 
@@ -136,8 +294,8 @@ class FredIndexFetcher
                 CURLOPT_CONNECTTIMEOUT => 15,
                 CURLOPT_ENCODING       => 'gzip, deflate',
                 CURLOPT_SSL_VERIFYPEER => true,
-                CURLOPT_USERAGENT      => 'Mozilla/5.0 (compatible; fred-index-fetcher/1.0)',
-                CURLOPT_HTTPHEADER     => ['Accept: application/json'],
+                CURLOPT_USERAGENT      => $userAgent ?? 'Mozilla/5.0 (compatible; fred-index-fetcher/1.0)',
+                CURLOPT_HTTPHEADER     => $headers !== [] ? $headers : ['Accept: application/json'],
             ]);
 
             $body   = curl_exec($ch);
@@ -254,11 +412,12 @@ class FredIndexFetcher
 
 // ========== CLI 入口 ==========
 if (PHP_SAPI === 'cli') {
-    $opts = getopt('', ['series::', 'start::', 'end::', 'overlap::', 'api-key::', 'help']);
+    $opts = getopt('', ['series::', 'start::', 'end::', 'overlap::', 'api-key::', 'no-fallback', 'help']);
 
     if (isset($opts['help'])) {
-        echo "用法：php fetch_us_indexes.php [--series=DJIA,SP500,NASDAQ100,NASDAQNDXTMC,NASDAQNDXTMCTR] [--start=2026-01-01] [--end=2026-09-09] [--overlap=5] [--api-key=xxx]\n";
+        echo "用法：php fetch_us_indexes.php [--series=DJIA,SP500,NASDAQ100,NASDAQNDXTMC,NASDAQNDXTMCTR] [--start=2026-01-01] [--end=2026-09-09] [--overlap=5] [--api-key=xxx] [--no-fallback]\n";
         echo "默认增量更新 config.php 的 daily 目录下全部指数文件。\n";
+        echo "FRED 滞后时会自动回落 Nasdaq 官方源补齐最新交易日（NASDAQ100 / NDXTMC / NDXTMCTR）；--no-fallback 可关闭。\n";
         exit(0);
     }
 
@@ -271,6 +430,7 @@ if (PHP_SAPI === 'cli') {
 
     $end     = $opts['end']     ?? date('Y-m-d');
     $overlap = max(0, (int) ($opts['overlap'] ?? 5));
+    $noFallback = isset($opts['no-fallback']);
     // 日线 CSV 输出目录统一来自项目根目录 config.php 的 daily 配置
     require_once __DIR__ . '/config_loader.php';
     $dataDir = quant_config()['daily_dir'];
@@ -320,6 +480,38 @@ if (PHP_SAPI === 'cli') {
             }
 
             $merged = FredIndexFetcher::merge($existing, $fresh);
+
+            // FRED 对 Nasdaq 自有指数转载滞后：若仍未追到 --end，回落 Nasdaq 官方源补齐缺失交易日
+            $lastDate = $merged['rows'] === [] ? '' : $merged['rows'][count($merged['rows']) - 1]['date'];
+            $nSymbol  = FredIndexFetcher::SERIES_NASDAQ[$seriesId] ?? '';
+            $gSymbol  = FredIndexFetcher::SERIES_GIW[$seriesId] ?? '';
+            if (!$noFallback && $lastDate !== '' && $lastDate < $end && ($nSymbol !== '' || $gSymbol !== '')) {
+                $from = date('Y-m-d', strtotime("{$lastDate} +1 day"));
+                try {
+                    if ($nSymbol !== '') {
+                        $supp = $fetcher->fetchNasdaq($nSymbol, $from, $end);
+                        $source = 'Nasdaq 官方行情接口';
+                    } else {
+                        $supp = $fetcher->fetchGiw($gSymbol, $from, $end);
+                        $source = 'Nasdaq 全球指数导出';
+                    }
+                    // 只补 FRED 还缺的日期，重叠区间仍以 FRED 为准
+                    $supp = array_values(array_filter($supp, fn(array $r): bool => $r['date'] > $lastDate));
+                    if ($supp !== []) {
+                        $extra  = FredIndexFetcher::merge($merged['rows'], $supp);
+                        $merged = [
+                            'rows'    => $extra['rows'],
+                            'added'   => $merged['added'] + $extra['added'],
+                            'updated' => $merged['updated'] + $extra['updated'],
+                        ];
+                        printf("[%s] FRED 仅到 %s，回落%s补充 %d 条\n",
+                            $seriesId, $lastDate, $source, count($supp));
+                    }
+                } catch (Throwable $e) {
+                    fwrite(STDERR, "[{$seriesId}] 补充源失败（不影响 FRED 数据）：" . $e->getMessage() . "\n");
+                }
+            }
+
             $fetcher->writeCsv($merged['rows'], $file);
 
             $last = $merged['rows'][count($merged['rows']) - 1];

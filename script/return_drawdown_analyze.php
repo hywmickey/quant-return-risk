@@ -607,6 +607,8 @@ $html .= "th,td{border:1px solid #ccc;padding:6px 12px;text-align:right;white-sp
 $html .= "th{background:#333;color:#fff;text-align:center}\n";
 $html .= "tbody td{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,\"Courier New\",monospace}\n";
 $html .= "td[title]{text-decoration:underline dotted #999}\n";
+// 单元格里的补充说明（未修复行的「已反弹/复平」进度）用小号灰字，避免抢主数值
+$html .= ".sub{color:#888;font-size:11px;white-space:nowrap}\n";
 $html .= "table.kv td:first-child{text-align:left}\n";
 // 年度涨跌幅表每格是「涨跌幅 + 年份」两行，居中排更整齐
 $html .= "#annual-table tbody td{text-align:center}\n";
@@ -817,7 +819,11 @@ $column_hints = [
     'dca_low_pct'   => "定投至低点收益率(%) = (低点日期的持仓市值 / 累计投入 - 1) * 100\n"
         . '从起点日期到低点日期之间每个交易日等额投入 1 份（两端都算在内），按当日点位买入份额',
     'recover_days'  => "修复天数 = 修复日期 - 低点日期（自然日）\n"
-        . '修复日期取低点之后首个收盘点位 >= 起点高点的交易日',
+        . "修复日期取低点之后首个收盘点位 >= 起点高点的交易日\n"
+        . '未修复的行：修复日期显示「截至 <最新日期>」，修复点位/修复天数按最新交易日计算',
+    'rebound_pct'   => "回本涨幅(%) = (起点高点 / 低点点位 - 1) * 100，即从低点涨回起点高点所需的涨幅\n"
+        . '未修复的行额外显示：已反弹 = (最新点位 / 低点点位 - 1) * 100，括号内为反弹比例 = 已反弹 / 回本涨幅 * 100，'
+        . '复平需涨 = (起点高点 / 最新点位 - 1) * 100',
     'dca_days'      => "定投转正天数 = 定投转正日期 - 起点日期（自然日）\n"
         . '从起点日期起每个交易日等额投入 1 份，越过低点日期后首次出现「持仓市值 > 累计投入」的交易日即为转正日',
     'next_high_pct' => "距下个新高涨幅(%) = (之后首个创新高行的起点高点 / 本行低点点位 - 1) * 100\n"
@@ -835,6 +841,8 @@ $html .= "<caption>" . htmlspecialchars(
     . '【' . $column_labels['rank_decile'] . '】【' . $column_labels['drawdown_pct']
     . '】两列背景色按档位取十档固定色，从 #ffbfbf（第 1 档，回撤最大）到 #bfffbf（第 10 档）；'
     . '【' . $column_labels['high_level'] . '】未超过前面所有行时用 #d9d9d9 标记；'
+    . '尚未修复的行在【' . $column_labels['recover_date'] . '】显示「截至 <最新日期>」，'
+    . '并在【' . $column_labels['rebound_pct'] . '】下方给出已反弹幅度（括号内为反弹比例）与复平需涨；'
     . '点击某行可把该行背景切换为 #e5e5ff（已有背景色的单元格保持原色），再点一次恢复',
     ENT_QUOTES) . "</caption>\n";
 
@@ -890,6 +898,33 @@ foreach ($top_rows as $i => $row) {
     $top_rows[$i]['rebound_pct'] = round(($row['high_level'] / $row['low_level'] - 1) * 100, 2);
 }
 
+// 截至数据末日仍未修复的回撤（recover_date 为空）：修复日期列显示「截至 <最新日期>」，
+// 修复点位/修复天数按最新交易日计算，并在回本涨幅列下方补充当前的修复进度：
+//   反弹收益率 = (最新点位 / 低点点位 - 1) * 100
+//   反弹比例   = 反弹收益率 / 回本涨幅 * 100（回本涨幅即修复所需的总涨幅）
+//   复平空间   = (起点高点 / 最新点位 - 1) * 100（还需上涨多少才能涨回起点高点）
+$latest_point = $index_data[count($index_data) - 1];
+foreach ($top_rows as $i => $row) {
+    $top_rows[$i]['latest_date']          = '';
+    $top_rows[$i]['rebound_now_pct']      = '';
+    $top_rows[$i]['rebound_progress_pct'] = '';
+    $top_rows[$i]['gap_to_recover_pct']   = '';
+
+    if ($row['recover_date'] !== '' || $latest_point['date'] <= $row['date_end']) {
+        continue;
+    }
+
+    $now_pct = ($latest_point['level'] / $row['low_level'] - 1) * 100;
+    $top_rows[$i]['latest_date']          = $latest_point['date'];
+    $top_rows[$i]['recover_level']        = round($latest_point['level'], 6);
+    $top_rows[$i]['recover_days']         = (int) round((strtotime($latest_point['date']) - strtotime($row['date_end'])) / 86400);
+    $top_rows[$i]['rebound_now_pct']      = round($now_pct, 2);
+    $top_rows[$i]['rebound_progress_pct'] = $row['rebound_pct'] > 0
+        ? round(min(100, $now_pct / $row['rebound_pct'] * 100), 2)
+        : '';
+    $top_rows[$i]['gap_to_recover_pct']   = round(($row['high_level'] / $latest_point['level'] - 1) * 100, 2);
+}
+
 // is_new_high：high_level 是否超过前面所有行（起点是否创了新高），用于灰底标记和下面的 next_high_pct
 $high_max = null;
 foreach ($top_rows as $i => $row) {
@@ -938,8 +973,25 @@ foreach (align_column_decimals($top_rows, $columns) as $row) {
             $title = ' title="' . htmlspecialchars(format_duration_text((int) $row[$col]), ENT_QUOTES) . '"';
         }
 
+        $cell = htmlspecialchars((string) $row[$col], ENT_QUOTES);
+        if ($col === 'recover_date' && (string) $row[$col] === '') {
+            // 未修复：日期列显示截至最新交易日，并在下一行标注未修复
+            $cell  = '截至 ' . htmlspecialchars((string) $row['latest_date'], ENT_QUOTES)
+                . '<br><span class="sub">未修复</span>';
+            $title = ' title="截至 ' . htmlspecialchars((string) $row['latest_date'], ENT_QUOTES)
+                . ' 仍未涨回起点高点；修复点位/修复天数按该日收盘计算"';
+        } elseif ($col === 'recover_date') {
+            $title = ' title="低点之后首个收盘点位 >= 起点高点的交易日"';
+        } elseif ($col === 'rebound_pct' && (string) $row['rebound_now_pct'] !== '') {
+            // 未修复的行在回本涨幅下方补充当前修复进度（不新增列）
+            $cell .= '<br><span class="sub">已反弹 ' . $row['rebound_now_pct']
+                . '%（' . $row['rebound_progress_pct'] . '%）<br>复平需涨 ' . $row['gap_to_recover_pct'] . '%</span>';
+            $title = ' title="本行未修复：已反弹 = (最新点位 / 低点点位 - 1) * 100'
+                . "\n" . '括号内为反弹比例 = 已反弹 / 回本涨幅 * 100'
+                . "\n" . '复平需涨 = (起点高点 / 最新点位 - 1) * 100"';
+        }
 
-        $html .= '<td' . $style . $title . '>' . htmlspecialchars((string) $row[$col], ENT_QUOTES) . '</td>';
+        $html .= '<td' . $style . $title . '>' . $cell . '</td>';
     }
     $html .= "</tr>\n";
 }
